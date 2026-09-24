@@ -1,0 +1,214 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// source tags every sidebar token this tool writes, so clearing ours never
+// touches another plugin's.
+const source = "shepherd"
+
+type Agent struct {
+	Name        string `json:"name"`
+	Kind        string `json:"agent"`
+	Status      string `json:"agent_status"`
+	PaneID      string `json:"pane_id"`
+	TabID       string `json:"tab_id"`
+	WorkspaceID string `json:"workspace_id"`
+	Cwd         string `json:"cwd"`
+	Seq         int64  `json:"state_change_seq"`
+}
+
+type Herdr struct {
+	bin string
+}
+
+func newHerdr() Herdr {
+	bin := os.Getenv("HERDR_BIN_PATH")
+	if bin == "" {
+		bin = "herdr"
+	}
+	return Herdr{bin: bin}
+}
+
+// call runs a herdr API command and returns its .result object.
+func (h Herdr) call(timeout time.Duration, args ...string) (json.RawMessage, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, h.bin, args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("herdr %s: %v: %s", strings.Join(args[:min(2, len(args))], " "), err, strings.TrimSpace(stderr.String()))
+	}
+	// Some commands (pane report-metadata) print nothing on success.
+	if len(bytes.TrimSpace(stdout.Bytes())) == 0 {
+		return json.RawMessage("{}"), nil
+	}
+	var env struct {
+		Result json.RawMessage `json:"result"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		return nil, fmt.Errorf("herdr %s: decoding: %w", strings.Join(args[:min(2, len(args))], " "), err)
+	}
+	return env.Result, nil
+}
+
+const callTimeout = 10 * time.Second
+
+func (h Herdr) Agents() ([]Agent, error) {
+	res, err := h.call(callTimeout, "agent", "list")
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Agents []Agent `json:"agents"`
+	}
+	return out.Agents, json.Unmarshal(res, &out)
+}
+
+type Opened struct {
+	WorkspaceID string
+	PaneID      string
+	Path        string
+}
+
+func parseOpened(res json.RawMessage) (Opened, error) {
+	var r struct {
+		Workspace struct {
+			ID       string `json:"workspace_id"`
+			Worktree struct {
+				Path string `json:"checkout_path"`
+			} `json:"worktree"`
+		} `json:"workspace"`
+		Worktree struct {
+			Path string `json:"path"`
+		} `json:"worktree"`
+		RootPane struct {
+			ID string `json:"pane_id"`
+		} `json:"root_pane"`
+	}
+	if err := json.Unmarshal(res, &r); err != nil {
+		return Opened{}, err
+	}
+	o := Opened{WorkspaceID: r.Workspace.ID, PaneID: r.RootPane.ID, Path: r.Worktree.Path}
+	if o.Path == "" {
+		o.Path = r.Workspace.Worktree.Path
+	}
+	if o.PaneID == "" {
+		return o, fmt.Errorf("herdr returned no root pane")
+	}
+	return o, nil
+}
+
+func focusFlag(focus bool) string {
+	if focus {
+		return "--focus"
+	}
+	return "--no-focus"
+}
+
+func (h Herdr) WorktreeCreate(repo, branch, base, label string, focus bool) (Opened, error) {
+	res, err := h.call(60*time.Second, "worktree", "create", "--cwd", repo, "--branch", branch, "--base", base, "--label", label, focusFlag(focus))
+	if err != nil {
+		return Opened{}, err
+	}
+	return parseOpened(res)
+}
+
+func (h Herdr) WorktreeOpen(repo, branch, label string, focus bool) (Opened, error) {
+	res, err := h.call(60*time.Second, "worktree", "open", "--cwd", repo, "--branch", branch, "--label", label, focusFlag(focus))
+	if err != nil {
+		return Opened{}, err
+	}
+	return parseOpened(res)
+}
+
+func (h Herdr) WorktreeRemove(workspace string) error {
+	_, err := h.call(30*time.Second, "worktree", "remove", "--workspace", workspace)
+	return err
+}
+
+type Worktree struct {
+	Branch      string `json:"branch"`
+	Path        string `json:"path"`
+	Linked      bool   `json:"is_linked_worktree"`
+	WorkspaceID string `json:"open_workspace_id"`
+}
+
+func (h Herdr) Worktrees(repo string) ([]Worktree, error) {
+	res, err := h.call(callTimeout, "worktree", "list", "--cwd", repo)
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Worktrees []Worktree `json:"worktrees"`
+	}
+	return out.Worktrees, json.Unmarshal(res, &out)
+}
+
+func (h Herdr) WorkspaceCreate(cwd, label string, focus bool) (Opened, error) {
+	res, err := h.call(callTimeout, "workspace", "create", "--cwd", cwd, "--label", label, focusFlag(focus))
+	if err != nil {
+		return Opened{}, err
+	}
+	return parseOpened(res)
+}
+
+func (h Herdr) TabRename(tab, label string) error {
+	_, err := h.call(callTimeout, "tab", "rename", tab, label)
+	return err
+}
+
+func (h Herdr) AgentStart(name, kind, pane string) error {
+	_, err := h.call(40*time.Second, "agent", "start", name, "--kind", kind, "--pane", pane, "--timeout", "30000")
+	return err
+}
+
+func (h Herdr) Prompt(target, text string) error {
+	_, err := h.call(callTimeout, "agent", "prompt", target, text)
+	return err
+}
+
+func (h Herdr) Focus(target string) error {
+	_, err := h.call(callTimeout, "agent", "focus", target)
+	return err
+}
+
+func (h Herdr) Notify(title, body string) {
+	_, _ = h.call(callTimeout, "notification", "show", title, "--body", body)
+}
+
+// ReportState sets this tool's sidebar tokens on a pane. A TTL makes stale rows
+// disappear on their own if the ticker dies.
+func (h Herdr) ReportState(pane string, tokens map[string]string, ttl time.Duration) error {
+	args := []string{"pane", "report-metadata", pane, "--source", source, "--ttl-ms", strconv.FormatInt(ttl.Milliseconds(), 10)}
+	for k, v := range tokens {
+		args = append(args, "--token", k+"="+v)
+	}
+	_, err := h.call(callTimeout, args...)
+	return err
+}
+
+func (h Herdr) ClearState(pane string) {
+	_, _ = h.call(callTimeout, "pane", "report-metadata", pane, "--source", source, "--clear-token", "sh_state", "--clear-token", "sh_rank")
+}
+
+func (h Herdr) OpenPane(entrypoint string) error {
+	_, err := h.call(callTimeout, "plugin", "pane", "open", "--plugin", source, "--entrypoint", entrypoint)
+	return err
+}
+
+// agentName maps a bead id onto herdr's agent-name alphabet
+// [a-z][a-z0-9_-]{0,31}: the dot of a sub-bead becomes a dash.
+func agentName(beadID string) string {
+	return strings.ReplaceAll(strings.ToLower(beadID), ".", "-")
+}

@@ -1,0 +1,44 @@
+id = "shepherd"
+name = "Shepherd"
+version = "0.1.0"
+min_herdr_version = "0.9.1"
+description = "One coordinator, a worktree and agent per bead, beads as the only record."
+platforms = ["linux", "macos"]
+
+[[build]]
+command = ["sh", "scripts/build.sh"]
+
+[[startup]]
+command = ["bin/shepherd", "startup"]
+
+[[actions]]
+id = "board"
+title = "Shepherd: board"
+contexts = ["global", "workspace"]
+command = ["bin/shepherd", "action", "board"]
+
+[[actions]]
+id = "coordinator"
+title = "Shepherd: open the coordinator"
+contexts = ["global", "workspace"]
+command = ["bin/shepherd", "coordinator"]
+
+[[actions]]
+id = "focus-clipboard"
+title = "Shepherd: focus or start the bead on the clipboard"
+contexts = ["global", "workspace"]
+command = ["bin/shepherd", "focus"]
+
+[[actions]]
+id = "focus-clipboard-codex"
+title = "Shepherd: focus or start the bead on the clipboard (Codex)"
+contexts = ["global", "workspace"]
+command = ["bin/shepherd", "focus", "--agent", "codex"]
+
+[[panes]]
+id = "board"
+title = "Shepherd"
+placement = "popup"
+width = "85%"
+height = "80%"
+command = ["bin/shepherd", "board"]

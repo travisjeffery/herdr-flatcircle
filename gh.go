@@ -1,0 +1,163 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os/exec"
+	"sort"
+	"strings"
+	"time"
+)
+
+type PR struct {
+	Number         int       `json:"number"`
+	URL            string    `json:"url"`
+	Head           string    `json:"headRefName"`
+	State          string    `json:"state"` // OPEN, MERGED, CLOSED
+	IsDraft        bool      `json:"isDraft"`
+	ReviewDecision string    `json:"reviewDecision"`
+	Checks         []Check   `json:"statusCheckRollup"`
+	Reviews        []Review  `json:"reviews"`
+	MergedAt       time.Time `json:"mergedAt"`
+}
+
+type Check struct {
+	Name       string `json:"name"`
+	Context    string `json:"context"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+	State      string `json:"state"`
+}
+
+type Review struct {
+	Author struct {
+		Login string `json:"login"`
+	} `json:"author"`
+	State       string    `json:"state"`
+	SubmittedAt time.Time `json:"submittedAt"`
+}
+
+// listFields stay light: statusCheckRollup across 100 PRs in a repo with many
+// checks per PR makes GitHub's GraphQL time out (504).
+const listFields = "number,url,headRefName,state,isDraft,mergedAt"
+const detailFields = listFields + ",reviewDecision,statusCheckRollup,reviews"
+
+type Checks struct {
+	Failing []string
+	Pending int
+	Passing int
+}
+
+func (c Check) label() string {
+	if c.Name != "" {
+		return c.Name
+	}
+	return c.Context
+}
+
+func summarizeChecks(checks []Check) Checks {
+	var s Checks
+	seen := map[string]bool{}
+	for _, c := range checks {
+		result := strings.ToUpper(c.Conclusion)
+		if result == "" {
+			result = strings.ToUpper(c.State)
+		}
+		switch {
+		case strings.ToUpper(c.Status) != "" && strings.ToUpper(c.Status) != "COMPLETED":
+			s.Pending++
+		case result == "PENDING" || result == "EXPECTED":
+			s.Pending++
+		case result == "FAILURE" || result == "ERROR" || result == "TIMED_OUT" || result == "STARTUP_FAILURE" || result == "ACTION_REQUIRED":
+			if !seen[c.label()] {
+				seen[c.label()] = true
+				s.Failing = append(s.Failing, c.label())
+			}
+		default:
+			s.Passing++
+		}
+	}
+	sort.Strings(s.Failing)
+	return s
+}
+
+// reviewsBy counts reviews not written by login, so a thread's own replies
+// never look like new feedback.
+func reviewsNotBy(reviews []Review, login string) int {
+	n := 0
+	for _, r := range reviews {
+		if r.Author.Login != login {
+			n++
+		}
+	}
+	return n
+}
+
+type GH struct {
+	repo string
+}
+
+func (g GH) run(args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gh", args...)
+	cmd.Dir = g.repo
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("gh %s: %v: %s", strings.Join(args[:min(2, len(args))], " "), err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.Bytes(), nil
+}
+
+func (g GH) Login() string {
+	out, err := g.run("api", "user", "--jq", ".login")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// Mine lists the user's recent PRs in the repo, newest first.
+func (g GH) Mine() ([]PR, error) {
+	out, err := g.run("pr", "list", "--author", "@me", "--state", "all", "--limit", "100", "--json", listFields)
+	if err != nil {
+		return nil, err
+	}
+	var prs []PR
+	return prs, json.Unmarshal(out, &prs)
+}
+
+func (g GH) View(url string, detail bool) (PR, error) {
+	fields := listFields
+	if detail {
+		fields = detailFields
+	}
+	out, err := g.run("pr", "view", url, "--json", fields)
+	if err != nil {
+		return PR{}, err
+	}
+	var pr PR
+	return pr, json.Unmarshal(out, &pr)
+}
+
+// prForBead picks the PR a bead is being delivered through: one on the bead's
+// own branch first, else the last PR its notes link to. A bead worked on a
+// branch named for its Linear key (tj/eng-1102-…) is found through its notes.
+func prForBead(b Bead, branchPrefix string, mine []PR, byURL map[string]PR) (PR, bool) {
+	want := branchPrefix + agentName(b.ID)
+	for _, pr := range mine {
+		if pr.Head == want || strings.HasPrefix(pr.Head, want+"-") {
+			return pr, true
+		}
+	}
+	urls := NotedPRs(b.Notes)
+	for i := len(urls) - 1; i >= 0; i-- {
+		if pr, ok := byURL[urls[i]]; ok {
+			return pr, true
+		}
+	}
+	return PR{}, false
+}

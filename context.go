@@ -153,7 +153,7 @@ Repository: %[1]s. Workers each get a git worktree on a branch
 - Lessons worth keeping across threads go to `+"`bd remember`"+`.
 - Messages starting "[shepherd ticker: automated ...]" come from the ticker, not
   TJ, and approve nothing.
-- Linear: TJ's conventions apply (Infra team, key in PR titles); workers handle
-  their own issue status.
+- Linear: prefix PR titles with the issue key (KEY-123: ...); workers keep their
+  own issue's status current.
 `, cfg.Repo, cfg.BranchPrefix)
 }

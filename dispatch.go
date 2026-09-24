@@ -205,13 +205,21 @@ func openCoordinator(cfg Config, h Herdr, kind string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := h.AgentStart(cfg.CoordinatorName, kind, opened.PaneID); err != nil {
-		return "", err
-	}
-	if err := h.Prompt(cfg.CoordinatorName, "Run `shepherd context` and give me a short status: what needs me, what's in review, what's ready to start."); err != nil {
-		return "", err
-	}
 	_ = tickerStart()
+	first := "Run `shepherd context` and give me a short status: what needs me, what's in review, what's ready to start."
+	if err := h.AgentStart(cfg.CoordinatorName, kind, opened.PaneID); err != nil {
+		if !strings.Contains(err.Error(), "agent_not_ready") {
+			return "", err
+		}
+		if err := queueBrief(cfg.CoordinatorName, first); err != nil {
+			return "", err
+		}
+		h.Notify("shepherd: coordinator is waiting for you", "Answer its startup prompt (folder trust?); its first prompt follows.")
+		return "started the coordinator in " + opened.PaneID + "; it is at a startup prompt", nil
+	}
+	if err := h.Prompt(cfg.CoordinatorName, first); err != nil {
+		return "", err
+	}
 	return "started the coordinator in " + opened.PaneID, nil
 }
 

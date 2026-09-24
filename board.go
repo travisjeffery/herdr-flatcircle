@@ -207,23 +207,43 @@ func drawBoard(rows []boardRow, cur int, status string) {
 	if cur >= body {
 		start = cur - body + 1
 	}
+	stateW := min(34, max(12, w/3))
+	titleW := w - 2 - 17 - stateW - 1
 	for i := start; i < len(rows) && i-start < body; i++ {
 		r := rows[i]
 		if r.header != "" {
-			fmt.Fprintf(&s, "%s%s%s\r\n", ansiBold, r.header, ansiReset)
+			fmt.Fprintf(&s, "%s%s%s\r\n", ansiBold, fit(r.header, w), ansiReset)
 			continue
 		}
-		id := fmt.Sprintf("%-16s", r.bead.ID)
-		state := fmt.Sprintf("%-34s", shortTitle(r.line, 34))
-		titleW := max(w-len(id)-38, 10)
-		title := shortTitle(r.bead.Title, titleW)
-		line := fmt.Sprintf("  %s %s%s%s %s", id, r.color, state, ansiReset, title)
-		if i == cur {
-			line = ansiInvert + fmt.Sprintf("  %s %s %s", id, state, title) + ansiReset
+		id := fit(r.bead.ID, 16) + " "
+		state := fit(r.line, stateW)
+		title := ""
+		if titleW >= 8 {
+			title = " " + fit(r.bead.Title, titleW)
 		}
-		s.WriteString(line + "\r\n")
+		if i == cur {
+			fmt.Fprintf(&s, "%s  %s%s%s%s\r\n", ansiInvert, id, state, title, ansiReset)
+		} else {
+			fmt.Fprintf(&s, "  %s%s%s%s%s\r\n", id, r.color, state, ansiReset, title)
+		}
 	}
-	fmt.Fprintf(&s, "\x1b[%d;1H%s%s%s", hgt-1, ansiRed, shortTitle(status, w-1), ansiReset)
-	fmt.Fprintf(&s, "\x1b[%d;1H%s↵ focus/start  c claude  x codex  n toggle next  y copy id  r refresh  q quit%s", hgt, ansiDim, ansiReset)
+	fmt.Fprintf(&s, "\x1b[%d;1H%s%s%s", hgt-1, ansiRed, fit(status, w-1), ansiReset)
+	fmt.Fprintf(&s, "\x1b[%d;1H%s%s%s", hgt, ansiDim, fit("↵ focus/start  c claude  x codex  n next  y copy  r refresh  q quit", w-1), ansiReset)
 	fmt.Print(s.String())
+}
+
+// fit pads or cuts s to exactly n characters (runes, not bytes: the state
+// lines carry "·" and "…").
+func fit(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) > n {
+		if n == 1 {
+			return "…"
+		}
+		return string(r[:n-1]) + "…"
+	}
+	return s + strings.Repeat(" ", n-len(r))
 }

@@ -13,6 +13,7 @@ import (
 
 type PR struct {
 	Number         int       `json:"number"`
+	Title          string    `json:"title"`
 	URL            string    `json:"url"`
 	Head           string    `json:"headRefName"`
 	State          string    `json:"state"` // OPEN, MERGED, CLOSED
@@ -41,7 +42,7 @@ type Review struct {
 
 // listFields stay light: statusCheckRollup across 100 PRs in a repo with many
 // checks per PR makes GitHub's GraphQL time out (504).
-const listFields = "number,url,headRefName,state,isDraft,mergedAt"
+const listFields = "number,title,url,headRefName,state,isDraft,mergedAt"
 const detailFields = listFields + ",reviewDecision,statusCheckRollup,reviews"
 
 type Checks struct {

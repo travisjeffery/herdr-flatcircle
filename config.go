@@ -28,6 +28,9 @@ type Config struct {
 	// Remove a bead's worktree once its PR merged, the bead is closed and its
 	// agent is idle. Off by default: removal closes the workspace.
 	AutoResolve bool `toml:"auto_resolve"`
+	// Only keys with these team prefixes count as Linear issues; empty accepts
+	// any key outside a small denylist.
+	LinearPrefixes []string `toml:"linear_prefixes"`
 }
 
 func defaultConfig() Config {

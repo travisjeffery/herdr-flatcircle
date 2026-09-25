@@ -321,6 +321,10 @@ Inbox event kinds: `needs_you`, `checks_failing`, `new_review`, `merged`,
 
 ### Features in detail
 
+- **Names.** Shepherd ties a worker to its bead by name: the bead id with
+  dots as dashes (`backend-ab12.3` → `backend-ab12-3`). Dispatch and resume
+  set it. If something else renames a worker, the ticker renames it back once
+  a minute, when it's the only agent in an active bead's worktree.
 - **Needs you.** A thread needs you when its bead is `needs_me` (the question
   is its latest note) or its agent is stopped at a permission or question
   prompt.

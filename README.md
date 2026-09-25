@@ -214,6 +214,10 @@ auto_resolve = false      # remove a merged, closed bead's worktree automaticall
   tokens by hand.
 - **The coordinator** reads `shepherd context` each turn: an inbox of events,
   every active thread and the beads ready to start.
+- **Reporting.** `shepherd report [--since 24h|7d|YYYY-MM-DD]` prints Markdown
+  for a daily or weekly update: beads closed in the window with their close
+  reasons and PRs, your PRs merged without a bead, open PRs in flight, and
+  needs_me beads with their latest note.
 
 State lives in `~/.local/state/shepherd/` (`state.json`, `inbox/`, `outbox/`,
 `ticker.log`).

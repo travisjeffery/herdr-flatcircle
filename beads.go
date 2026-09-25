@@ -22,6 +22,9 @@ type Bead struct {
 	Labels    []string  `json:"labels"`
 	Parent    string    `json:"parent"`
 	UpdatedAt time.Time `json:"updated_at"`
+
+	ClosedAt    time.Time `json:"closed_at"`
+	CloseReason string    `json:"close_reason"`
 }
 
 func (b Bead) HasLabel(l string) bool {

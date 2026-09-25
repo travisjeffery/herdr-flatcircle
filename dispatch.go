@@ -67,11 +67,11 @@ func dispatch(cfg Config, h Herdr, id string, o DispatchOpts) (string, error) {
 		return "", fmt.Errorf("%s is closed", id)
 	}
 	branch := branchFor(cfg.BranchPrefix, b)
-	opened, err := h.WorktreeCreate(cfg.Repo, branch, cfg.BaseBranch, name, o.Focus)
+	opened, err := h.WorktreeCreate(cfg.repoFor(b), branch, cfg.BaseBranch, name, o.Focus)
 	if err != nil {
 		// A resumed bead already has its branch.
 		var err2 error
-		if opened, err2 = h.WorktreeOpen(cfg.Repo, branch, name, o.Focus); err2 != nil {
+		if opened, err2 = h.WorktreeOpen(cfg.repoFor(b), branch, name, o.Focus); err2 != nil {
 			return "", fmt.Errorf("worktree for %s: %v; open: %v", branch, err, err2)
 		}
 	}
@@ -121,7 +121,8 @@ func resolve(cfg Config, h Herdr, id string, force bool) (string, error) {
 	if pr, ok := loadState().PRs[id]; ok && pr.Head != "" && pr.Head != branches[0] {
 		branches = append(branches, pr.Head)
 	}
-	wts, err := h.Worktrees(cfg.Repo)
+	repo := cfg.repoFor(b)
+	wts, err := h.Worktrees(repo)
 	if err != nil {
 		return "", err
 	}
@@ -135,19 +136,19 @@ func resolve(cfg Config, h Herdr, id string, force bool) (string, error) {
 	if target == nil {
 		return "nothing to remove: no linked worktree on " + strings.Join(branches, " or "), nil
 	}
-	if filepath.Clean(target.Path) == filepath.Clean(cfg.Repo) {
+	if filepath.Clean(target.Path) == filepath.Clean(repo) {
 		return "", fmt.Errorf("refusing to remove the main checkout %s", target.Path)
 	}
 	if target.WorkspaceID != "" {
 		if err := h.WorktreeRemove(target.WorkspaceID); err != nil {
 			return "", err
 		}
-	} else if out, err := exec.Command("git", "-C", cfg.Repo, "worktree", "remove", target.Path).CombinedOutput(); err != nil {
+	} else if out, err := exec.Command("git", "-C", repo, "worktree", "remove", target.Path).CombinedOutput(); err != nil {
 		return "", fmt.Errorf("git worktree remove: %v: %s", err, strings.TrimSpace(string(out)))
 	}
 	done := []string{"removed worktree " + target.Path}
-	if merged(cfg, target.Branch) {
-		if exec.Command("git", "-C", cfg.Repo, "branch", "-D", target.Branch).Run() == nil {
+	if merged(repo, target.Branch) {
+		if exec.Command("git", "-C", repo, "branch", "-D", target.Branch).Run() == nil {
 			done = append(done, "deleted merged branch "+target.Branch)
 		}
 	} else {
@@ -156,8 +157,8 @@ func resolve(cfg Config, h Herdr, id string, force bool) (string, error) {
 	return strings.Join(done, "; "), nil
 }
 
-func merged(cfg Config, branch string) bool {
-	out, err := GH{repo: cfg.Repo}.run("pr", "list", "--head", branch, "--state", "merged", "--json", "number", "--jq", "length")
+func merged(repo, branch string) bool {
+	out, err := GH{repo: repo}.run("pr", "list", "--head", branch, "--state", "merged", "--json", "number", "--jq", "length")
 	return err == nil && strings.TrimSpace(string(out)) != "0"
 }
 

@@ -26,6 +26,7 @@ type TickerState struct {
 	CoordReady   time.Time           `json:"coord_ready"`
 	CoordSeq     int64               `json:"coord_seq"`
 	GHFailingFor time.Time           `json:"gh_failing_since"`
+	GHFailingIn  []string            `json:"gh_failing_in"` // repos whose PR listing failed
 }
 
 func statePath() string { return filepath.Join(stateDir(), "state.json") }
@@ -117,21 +118,37 @@ func (t Ticker) refreshPRs(st *TickerState, active []Bead) {
 	if st.Login == "" {
 		st.Login = t.gh.Login()
 	}
-	mine, err := t.gh.Mine()
-	if err != nil {
-		t.log.Printf("gh: %v", err)
-		if st.GHFailingFor.IsZero() {
-			st.GHFailingFor = time.Now()
+	mine := map[string][]PR{}
+	st.GHFailingIn = nil
+	for _, repo := range t.cfg.allRepos() {
+		prs, err := GH{repo: repo}.Mine()
+		if err != nil {
+			t.log.Printf("gh %s: %v", repo, err)
+			st.GHFailingIn = append(st.GHFailingIn, repo)
+			continue
 		}
-		return
+		mine[repo] = prs
 	}
-	st.GHFailingFor = time.Time{}
+	if len(st.GHFailingIn) == 0 {
+		st.GHFailingFor = time.Time{}
+	} else if st.GHFailingFor.IsZero() {
+		st.GHFailingFor = time.Now()
+	}
 	inList := map[string]PR{}
-	for _, pr := range mine {
-		inList[pr.URL] = pr
+	for _, list := range mine {
+		for _, pr := range list {
+			inList[pr.URL] = pr
+		}
 	}
 	prs := map[string]PR{}
 	for _, b := range active {
+		own, listed := repoPRs(t.cfg, b, mine)
+		if !listed {
+			if old, ok := st.PRs[b.ID]; ok {
+				prs[b.ID] = old
+			}
+			continue
+		}
 		byURL := map[string]PR{}
 		for _, u := range NotedPRs(b.Notes) {
 			if pr, ok := inList[u]; ok {
@@ -140,7 +157,7 @@ func (t Ticker) refreshPRs(st *TickerState, active []Bead) {
 				byURL[u] = pr
 			}
 		}
-		pr, ok := prForBead(b, t.cfg.BranchPrefix, mine, byURL)
+		pr, ok := prForBead(b, t.cfg.BranchPrefix, own, byURL)
 		if !ok {
 			continue
 		}
@@ -157,6 +174,13 @@ func (t Ticker) refreshPRs(st *TickerState, active []Bead) {
 		prs[b.ID] = pr
 	}
 	st.PRs = prs
+}
+
+// repoPRs is the PR listing of the bead's own repository, or false when
+// listing it failed this pass.
+func repoPRs(cfg Config, b Bead, mine map[string][]PR) ([]PR, bool) {
+	prs, ok := mine[filepath.Clean(cfg.repoFor(b))]
+	return prs, ok
 }
 
 func rank(g Group, id string) string { return fmt.Sprintf("%d-%s", int(g), id) }

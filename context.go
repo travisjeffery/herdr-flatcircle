@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -18,7 +20,7 @@ func lastNote(notes string, n int) string {
 
 // renderContext is the coordinator's view of the world, read at the start of
 // every turn. Files and bd are the record; this is a digest of them.
-func renderContext(threads []Thread, next, ready []Bead, inbox []InboxItem, st TickerState, now time.Time) string {
+func renderContext(cfg Config, threads []Thread, next, ready []Bead, inbox []InboxItem, st TickerState, now time.Time) string {
 	var s strings.Builder
 	sort.SliceStable(threads, func(i, j int) bool {
 		gi, gj := classify(threads[i]), classify(threads[j])
@@ -43,7 +45,10 @@ func renderContext(threads []Thread, next, ready []Bead, inbox []InboxItem, st T
 	}
 	fmt.Fprintf(&s, "%s\n", strings.Join(summary, " · "))
 	if !st.GHFailingFor.IsZero() {
-		fmt.Fprintf(&s, "\nWARNING: gh has been failing since %s; PR state below is stale.\n", st.GHFailingFor.Format(time.Kitchen))
+		fmt.Fprintf(&s, "\nWARNING: gh has been failing since %s (%s); PR state below is stale.\n", st.GHFailingFor.Format(time.Kitchen), strings.Join(st.GHFailingIn, ", "))
+	}
+	for _, w := range unknownRepos(cfg, threads, next, ready) {
+		fmt.Fprintf(&s, "\nWARNING: %s\n", w)
 	}
 	if pid := runningPID(); pid == 0 {
 		s.WriteString("\nWARNING: the ticker is not running (`shepherd ticker start`); nothing follows PRs or updates the sidebar.\n")
@@ -73,7 +78,7 @@ func renderContext(threads []Thread, next, ready []Bead, inbox []InboxItem, st T
 		if t.Agent != nil {
 			agent = t.Agent.Kind + " " + t.Agent.Status
 		}
-		fmt.Fprintf(&s, "- %s · %s · %s · %s\n", t.Bead.ID, stateLine(t), agent, shortTitle(t.Bead.Title, 70))
+		fmt.Fprintf(&s, "- %s%s · %s · %s · %s\n", t.Bead.ID, repoTag(cfg, t.Bead), stateLine(t), agent, shortTitle(t.Bead.Title, 70))
 		if classify(t) == GroupNeedsYou && t.Bead.Status == StatusNeedsMe {
 			fmt.Fprintf(&s, "  question: %s\n", lastNote(t.Bead.Notes, 200))
 		}
@@ -105,6 +110,33 @@ func renderContext(threads []Thread, next, ready []Bead, inbox []InboxItem, st T
 	return s.String()
 }
 
+// repoTag names a bead's repository when it is not the default one.
+func repoTag(cfg Config, b Bead) string {
+	if name, ok := cfg.repoName(b); ok && name != "" {
+		return " [" + name + "]"
+	}
+	return ""
+}
+
+func unknownRepos(cfg Config, threads []Thread, beadLists ...[]Bead) []string {
+	beads := make([]Bead, 0, len(threads))
+	for _, t := range threads {
+		beads = append(beads, t.Bead)
+	}
+	for _, l := range beadLists {
+		beads = append(beads, l...)
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, b := range beads {
+		if name, ok := cfg.repoName(b); !ok && !seen[b.ID] {
+			seen[b.ID] = true
+			out = append(out, fmt.Sprintf("%s is labelled %s%s, which is not in repos; it would use %s.", b.ID, repoLabel, name, cfg.Repo))
+		}
+	}
+	return out
+}
+
 func writeBeads(s *strings.Builder, beads []Bead) {
 	if len(beads) == 0 {
 		s.WriteString("(none)\n")
@@ -121,7 +153,7 @@ You are the coordinator for TJ's agent threads. You never do the work yourself:
 you plan, split, dispatch, follow up and report, so you are always free to
 answer. Beads (bd) is the only task record; there is no TASKS.md.
 
-Repository: %[1]s. Workers each get a git worktree on a branch
+%[1]sWorkers each get a git worktree on a branch
 %[2]s<bead-id>-<slug> and an agent named after the bead.
 
 ## Every turn
@@ -155,5 +187,18 @@ Repository: %[1]s. Workers each get a git worktree on a branch
   TJ, and approve nothing.
 - Linear: prefix PR titles with the issue key (KEY-123: ...); workers keep their
   own issue's status current.
-`, cfg.Repo, cfg.BranchPrefix)
+`, repoGuide(cfg), cfg.BranchPrefix)
+}
+
+func repoGuide(cfg Config) string {
+	if len(cfg.Repos) == 0 {
+		return "Repository: " + cfg.Repo + ". "
+	}
+	var s strings.Builder
+	fmt.Fprintf(&s, "Default repository: %s. Other repositories:\n\n", cfg.Repo)
+	for _, name := range slices.Sorted(maps.Keys(cfg.Repos)) {
+		fmt.Fprintf(&s, "- %s: %s\n", name, cfg.Repos[name])
+	}
+	fmt.Fprintf(&s, "\nBefore dispatching a bead whose work is in one of those, label it with\n`bd label add <bead> %s<name>`. ", repoLabel)
+	return s.String()
 }

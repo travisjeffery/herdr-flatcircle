@@ -89,6 +89,18 @@ func expandHome(p string) string {
 	return p
 }
 
+// repoFor is the repository a bead's worktree, branch and PRs live in. Every
+// per-bead repo lookup goes through here so multi-repo support has one seam.
+func (c Config) repoFor(b Bead) string {
+	return c.Repo
+}
+
+// allRepos is every repository shepherd follows, for passes that are not about
+// one bead (PR listing, worktree sweeps).
+func (c Config) allRepos() []string {
+	return []string{c.Repo}
+}
+
 func (c Config) tick() time.Duration { return time.Duration(max(c.TickSeconds, 5)) * time.Second }
 func (c Config) ghEvery() time.Duration {
 	return time.Duration(max(c.GHSeconds, 30)) * time.Second

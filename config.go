@@ -80,7 +80,7 @@ func loadConfig() (Config, error) {
 		cfg.Repos[name] = expandHome(path)
 	}
 	if cfg.Repo == "" {
-		return cfg, errors.New("set repo in " + filepath.Join(configDir(), "config.toml"))
+		return cfg, errNoRepo
 	}
 	if cfg.BeadsDir == "" {
 		cfg.BeadsDir = filepath.Join(cfg.Repo, ".beads")
@@ -92,6 +92,8 @@ func loadConfig() (Config, error) {
 	}
 	return cfg, nil
 }
+
+var errNoRepo = errors.New("set repo in " + filepath.Join(configDir(), "config.toml") + ", or run `shepherd configure --repo <path>`")
 
 func expandHome(p string) string {
 	if rest, ok := strings.CutPrefix(p, "~/"); ok {

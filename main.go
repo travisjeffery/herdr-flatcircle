@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -9,7 +10,8 @@ import (
 	"time"
 )
 
-var version = "0.1.0"
+// version is set from the release tag at build time.
+var version = "dev"
 
 const usage = `shepherd — one coordinator, a worktree and agent per bead, beads as the only record.
 
@@ -30,7 +32,7 @@ Usage:
   shepherd board                                the board (runs as the plugin popup)
   shepherd ticker run|start|stop|status         the background loop: sidebar, PR follow-up, nudges
   shepherd tick                                 one ticker pass in the foreground
-  shepherd configure                            install shepherd's agent view (sort by thread state)
+  shepherd configure [--repo PATH]              first-time setup: config, ~/.local/bin link, agent view
   shepherd unconfigure                          stop the ticker, remove the view and sidebar tokens
   shepherd version
 `
@@ -64,7 +66,8 @@ func run(args []string) error {
 		return nil
 	}
 	cfg, err := loadConfig()
-	if err != nil {
+	// configure is how a first-time install gets its config.
+	if err != nil && !(errors.Is(err, errNoRepo) && len(args) > 0 && args[0] == "configure") {
 		return err
 	}
 	h := newHerdr()
@@ -72,6 +75,7 @@ func run(args []string) error {
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	kind := fs.String("agent", "", "agent kind: claude or codex")
 	focus := fs.Bool("focus", false, "focus the new workspace")
+	repoFlag := fs.String("repo", "", "configure: the repository shepherd works in, written to config.toml if it has none")
 	force := fs.Bool("force", false, "resolve even if the bead is open or its agent is working")
 	sinceFlag := fs.String("since", "24h", "report window: Nh, Nd or YYYY-MM-DD")
 	yes := fs.Bool("yes", false, "sweep: remove the clean candidates instead of listing them")
@@ -210,10 +214,17 @@ func run(args []string) error {
 		}
 		return tickerStart()
 	case "configure":
-		if err := setView(socketRPC{herdrSocket()}); err != nil {
-			return err
+		lines, err := configure(cfg, *repoFlag)
+		fmt.Print(strings.Join(append(lines, ""), "\n"))
+		// Run as a plugin action, stdout only reaches herdr's plugin log.
+		if os.Getenv("HERDR_PLUGIN_CONTEXT_JSON") != "" {
+			if err != nil {
+				h.Notify("shepherd: setup failed", err.Error())
+			} else {
+				h.Notify("shepherd: set up", strings.Join(lines, "\n"))
+			}
 		}
-		fmt.Println("agent view set: label \"shepherd\", sorted by thread state")
+		return err
 	case "unconfigure":
 		if err := tickerStop(); err != nil {
 			return err

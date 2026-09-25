@@ -1,6 +1,6 @@
 id = "shepherd"
 name = "Shepherd"
-version = "0.1.0"
+version = "0.2.0"
 min_herdr_version = "0.9.1"
 description = "One coordinator, a worktree and agent per bead, beads as the only record."
 platforms = ["linux", "macos"]
@@ -10,6 +10,12 @@ command = ["sh", "scripts/build.sh"]
 
 [[startup]]
 command = ["bin/shepherd", "startup"]
+
+[[actions]]
+id = "configure"
+title = "Shepherd: set up (config for this workspace's repo, CLI link, agent view)"
+contexts = ["workspace"]
+command = ["bin/shepherd", "configure"]
 
 [[actions]]
 id = "board"

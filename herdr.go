@@ -141,6 +141,7 @@ type Worktree struct {
 	Branch      string `json:"branch"`
 	Path        string `json:"path"`
 	Linked      bool   `json:"is_linked_worktree"`
+	Prunable    bool   `json:"is_prunable"`
 	WorkspaceID string `json:"open_workspace_id"`
 }
 

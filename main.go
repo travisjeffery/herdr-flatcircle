@@ -22,6 +22,7 @@ Usage:
   shepherd report [--since 24h|7d|YYYY-MM-DD]   Markdown of what shipped, merged, is in flight, needs you
   shepherd inbox done [<bead>...]               mark inbox items handled (all if none given)
   shepherd resolve <bead> [--force]             remove a finished bead's worktree and merged branch
+  shepherd sweep [--yes]                        list finished linked worktrees; --yes removes the safe ones
   shepherd board                                the board (runs as the plugin popup)
   shepherd ticker run|start|stop|status         the background loop: sidebar, PR follow-up, nudges
   shepherd tick                                 one ticker pass in the foreground
@@ -69,6 +70,7 @@ func run(args []string) error {
 	focus := fs.Bool("focus", false, "focus the new workspace")
 	force := fs.Bool("force", false, "resolve even if the bead is open or its agent is working")
 	sinceFlag := fs.String("since", "24h", "report window: Nh, Nd or YYYY-MM-DD")
+	yes := fs.Bool("yes", false, "sweep: remove the clean candidates instead of listing them")
 	pos, err := interspersed(fs, rest)
 	if err != nil {
 		return err
@@ -153,6 +155,8 @@ func run(args []string) error {
 			return err
 		}
 		fmt.Println(msg)
+	case "sweep":
+		return sweep(cfg, liveSweepEnv(h), *yes, os.Stdout)
 	case "board":
 		return runBoard(cfg)
 	case "action":

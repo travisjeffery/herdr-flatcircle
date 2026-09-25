@@ -240,6 +240,10 @@ configured repository falls back to `repo` and shows as a warning in
   production change) come back as a `RUN: <command>` note on a needs_me bead:
   the sidebar shows `needs you · run command`, the coordinator relays it ready
   to paste after `!`, and `p` in the board copies it.
+- **Sweep.** `shepherd sweep` lists linked worktrees whose PR merged, whose
+  bead is closed, or that git reports prunable, across every repo; `--yes`
+  removes only the ones that are clean, fully pushed and have no agent in them,
+  and deletes a local branch only when its PR merged.
 - **The coordinator** reads `shepherd context` each turn: an inbox of events,
   every active thread and the beads ready to start.
 - **Reporting.** `shepherd report [--since 24h|7d|YYYY-MM-DD]` prints Markdown

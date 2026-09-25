@@ -205,6 +205,10 @@ func (t Ticker) once(st *TickerState) error {
 	if err != nil {
 		return err
 	}
+	// Worktrees are listed with the PR pass, not every tick.
+	if st.LastGH.Equal(now) {
+		t.fixNames(st)
+	}
 	for _, name := range deliverOutbox(t.herdr, agents) {
 		t.log.Printf("delivered queued brief to %s", name)
 	}
@@ -492,4 +496,29 @@ func inboxDone(beads []string) (int, error) {
 		}
 	}
 	return n, nil
+}
+
+func (t Ticker) fixNames(st *TickerState) {
+	active, err := t.beads.Active()
+	if err != nil {
+		return
+	}
+	// All agents, unnamed ones included: gather only keeps named agents.
+	list, err := t.herdr.Agents()
+	if err != nil {
+		return
+	}
+	wts := map[string][]Worktree{}
+	for _, repo := range t.cfg.allRepos() {
+		if list, err := t.herdr.Worktrees(repo); err == nil {
+			wts[filepath.Clean(repo)] = list
+		}
+	}
+	for _, r := range nameFixes(t.cfg, active, list, st.PRs, wts) {
+		if err := t.herdr.Rename(r.Pane, r.To); err != nil {
+			t.log.Printf("rename %s: %v", r.Pane, err)
+			continue
+		}
+		t.log.Printf("renamed %s from %q to %s: it is the only agent in that bead's worktree", r.Pane, r.From, r.To)
+	}
 }

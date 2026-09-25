@@ -200,6 +200,11 @@ func (h Herdr) Prompt(target, text string) error {
 	return err
 }
 
+func (h Herdr) Rename(pane, name string) error {
+	_, err := h.call(callTimeout, "agent", "rename", pane, name)
+	return err
+}
+
 func (h Herdr) Focus(target string) error {
 	_, err := h.call(callTimeout, "agent", "focus", target)
 	return err

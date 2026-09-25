@@ -87,6 +87,10 @@ func staleClaims(bare []Bead, prs map[string]PR, now time.Time, age time.Duratio
 	return out
 }
 
+// staleAge is when a bare claim counts as stale, in context and by default for
+// shepherd stale.
+const staleAge = 7 * 24 * time.Hour
+
 func daysSince(t, now time.Time) int { return int(now.Sub(t).Hours() / 24) }
 
 // worktreed is the set of no-agent threads that have a worktree, or nil when

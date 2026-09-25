@@ -72,6 +72,9 @@ func dispatch(cfg Config, h Herdr, id string, o DispatchOpts) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if name, ok := cfg.repoName(b); !ok {
+		return "", fmt.Errorf("%s is labelled %s%s, which is not in repos; fix the label or add the repo", id, repoLabel, name)
+	}
 	if b.Status == StatusClosed {
 		return "", fmt.Errorf("%s is closed", id)
 	}

@@ -68,7 +68,8 @@ func linearMoves(threads []Thread) []string {
 		case t.PR.State == "OPEN" && !t.PR.IsDraft:
 			out = append(out, fmt.Sprintf("%s → In Review (PR #%d open)", t.Linear, t.PR.Number))
 		}
-		if t.PR.State == "OPEN" && !titledWith(t.PR.Title, t.Linear) {
+		// A PR cached before titles were fetched has none yet; don't flag it.
+		if t.PR.State == "OPEN" && t.PR.Title != "" && !titledWith(t.PR.Title, t.Linear) {
 			out = append(out, fmt.Sprintf("PR #%d title lacks %s", t.PR.Number, t.Linear))
 		}
 	}

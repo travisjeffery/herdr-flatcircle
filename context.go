@@ -67,19 +67,18 @@ func renderContext(cfg Config, threads []Thread, next, ready []Bead, inbox []Inb
 	if len(threads) == 0 {
 		s.WriteString("(none)\n")
 	}
-	var resumable, stale []string
-	untouched := -1
+	var resumable, stale, bare []string
 	for _, t := range threads {
 		// Claimed beads nobody is on are summarized, resumable or stale; listing each
 		// buries the threads that are live.
 		if classify(t) == GroupNoAgent {
-			if worktreed[t.Bead.ID] {
+			switch {
+			case worktreed[t.Bead.ID]:
 				resumable = append(resumable, t.Bead.ID)
-			} else {
+			case worktreed != nil && len(staleClaims([]Bead{t.Bead}, st.PRs, now, staleAge)) > 0:
 				stale = append(stale, t.Bead.ID)
-				if d := daysSince(t.Bead.UpdatedAt, now); untouched < 0 || d < untouched {
-					untouched = d
-				}
+			default:
+				bare = append(bare, t.Bead.ID)
 			}
 			continue
 		}
@@ -104,11 +103,11 @@ func renderContext(cfg Config, threads []Thread, next, ready []Bead, inbox []Inb
 	if len(resumable) > 0 {
 		fmt.Fprintf(&s, "- resumable (%d): %s  → shepherd resume\n", len(resumable), strings.Join(resumable, ", "))
 	}
-	switch {
-	case worktreed == nil && len(stale) > 0:
-		fmt.Fprintf(&s, "- claimed, no agent (%d): %s\n", len(stale), strings.Join(stale, ", "))
-	case len(stale) > 0:
-		fmt.Fprintf(&s, "- stale claims (%d): %s — no agent, no worktree, untouched %dd+\n", len(stale), strings.Join(stale, ", "), untouched)
+	if len(stale) > 0 {
+		fmt.Fprintf(&s, "- stale claims (%d): %s — no agent, no worktree, no PR, untouched %dd+  → shepherd stale\n", len(stale), strings.Join(stale, ", "), int(staleAge.Hours()/24))
+	}
+	if len(bare) > 0 {
+		fmt.Fprintf(&s, "- claimed, no agent (%d): %s\n", len(bare), strings.Join(bare, ", "))
 	}
 
 	if moves := linearMoves(threads); len(moves) > 0 {

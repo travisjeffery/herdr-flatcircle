@@ -146,7 +146,7 @@ func TestContextSplitsNoAgentThreads(t *testing.T) {
 	out := renderContext(Config{Repo: "/r"}, threads, nil, nil, nil, TickerState{}, map[string]bool{"backend-wt": true}, t0)
 	for _, want := range []string{
 		"- resumable (1): backend-wt  → shepherd resume\n",
-		"- stale claims (2): backend-old, backend-older — no agent, no worktree, untouched 30d+\n",
+		"- stale claims (2): backend-old, backend-older — no agent, no worktree, no PR, untouched 7d+  → shepherd stale\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)

@@ -203,6 +203,10 @@ auto_resolve = false      # remove a merged, closed bead's worktree automaticall
 - **Threads.** `shepherd dispatch <bead>` claims the bead, creates the worktree,
   starts the agent and sends the brief. If the agent opens on a startup prompt
   (folder trust), the brief waits in an outbox until you answer it.
+- **Resume.** Herdr restarts don't relaunch agents. `shepherd resume` restarts
+  each claimed bead's agent in its worktree with `claude --continue` or
+  `codex resume --last`; `shepherd stale [--release]` lists (or reopens)
+  claims with no agent or worktree untouched for `--days` (7).
 - **PRs** are found by branch name or by a PR link in the bead's notes, so a
   bead worked on a differently named branch is still followed.
 - **The ticker** only types into an agent that has been idle for

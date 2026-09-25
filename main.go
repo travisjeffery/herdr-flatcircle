@@ -21,6 +21,10 @@ Usage:
   shepherd context                              the coordinator's per-turn digest
   shepherd inbox done [<bead>...]               mark inbox items handled (all if none given)
   shepherd resolve <bead> [--force]             remove a finished bead's worktree and merged branch
+  shepherd resume [<bead>...] [--agent K]       restart exited agents in their worktrees, continuing
+                                                their last conversation (all resumable if none given)
+  shepherd stale [--days N] [--release]         claims with no agent or worktree untouched N days
+                                                (default 7); --release reopens them
   shepherd board                                the board (runs as the plugin popup)
   shepherd ticker run|start|stop|status         the background loop: sidebar, PR follow-up, nudges
   shepherd tick                                 one ticker pass in the foreground
@@ -67,6 +71,8 @@ func run(args []string) error {
 	kind := fs.String("agent", "", "agent kind: claude or codex")
 	focus := fs.Bool("focus", false, "focus the new workspace")
 	force := fs.Bool("force", false, "resolve even if the bead is open or its agent is working")
+	days := fs.Int("days", 7, "stale: untouched for at least this many days")
+	release := fs.Bool("release", false, "stale: set each stale claim back to open")
 	pos, err := interspersed(fs, rest)
 	if err != nil {
 		return err
@@ -121,7 +127,7 @@ func run(args []string) error {
 		next, _ := Beads{}.Next()
 		ready, _ := Beads{}.Ready()
 		inbox, _ := readInbox()
-		fmt.Print(renderContext(threads, next, ready, inbox, st, time.Now()))
+		fmt.Print(renderContext(threads, next, ready, inbox, st, worktreed(cfg, h, threads, st.PRs), time.Now()))
 	case "inbox":
 		if len(pos) == 0 || pos[0] != "done" {
 			return fmt.Errorf("usage: shepherd inbox done [<bead>...]")
@@ -140,6 +146,14 @@ func run(args []string) error {
 			return err
 		}
 		fmt.Println(msg)
+	case "resume":
+		lines, err := resume(cfg, h, pos, *kind)
+		fmt.Print(strings.Join(append(lines, ""), "\n"))
+		return err
+	case "stale":
+		lines, err := stale(cfg, h, *days, *release)
+		fmt.Print(strings.Join(append(lines, ""), "\n"))
+		return err
 	case "board":
 		return runBoard(cfg)
 	case "action":

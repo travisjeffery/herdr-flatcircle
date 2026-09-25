@@ -14,7 +14,7 @@ var validKinds = map[string]bool{"claude": true, "codex": true}
 
 // brief is the first prompt a worker gets. It stays short: the bead holds the
 // task, bd prime (SessionStart hook) holds the workflow and memories.
-func brief(b Bead, branch, path, instructions string) string {
+func brief(b Bead, branch, path, linear, instructions string) string {
 	var s strings.Builder
 	fmt.Fprintf(&s, "You are the shepherd worker for bead %s: %s\n", b.ID, b.Title)
 	fmt.Fprintf(&s, "It is already claimed for you. Worktree %s on branch %s. Start with `bd show %s`.\n\n", path, branch, b.ID)
@@ -25,6 +25,9 @@ func brief(b Bead, branch, path, instructions string) string {
 - Don't close the bead before the PR merges; after it merges, verify and ` + "`bd close " + b.ID + " --reason \"...\"`" + `.
 - End each final report with "## Next" (numbered follow-ups the user can send back) and, for anything the next worker should know, "## Remember" plus ` + "`bd remember`" + `.
 `)
+	if linear != "" {
+		fmt.Fprintf(&s, "\nLinear issue: %[1]s. Prefix the PR title with `%[1]s: `; move the issue to In Review when the PR is up and to Done once merged and verified.\n", linear)
+	}
 	if strings.TrimSpace(instructions) != "" {
 		s.WriteString("\nStanding instructions:\n")
 		s.WriteString(strings.TrimSpace(instructions))
@@ -80,7 +83,7 @@ func dispatch(cfg Config, h Herdr, id string, o DispatchOpts) (string, error) {
 	}
 	tab := opened.PaneID[:strings.LastIndex(opened.PaneID, ":")] + ":t1"
 	_ = h.TabRename(tab, shortTitle(b.Title, 34))
-	text := brief(b, branch, opened.Path, readInstructions())
+	text := brief(b, branch, opened.Path, linearKey(b, cfg.LinearPrefixes), readInstructions())
 	if err := h.AgentStart(name, kind, opened.PaneID); err != nil {
 		// A new worktree often opens on the agent's folder-trust prompt. The
 		// ticker delivers the brief once someone answers it.

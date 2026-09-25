@@ -42,6 +42,7 @@ type Thread struct {
 	PR      *PR
 	Checks  Checks
 	Reviews int // reviews by someone other than the user
+	Linear  string
 }
 
 func agentReady(a *Agent) bool {
@@ -87,6 +88,9 @@ func stateLine(t Thread) string {
 		case t.PR.State == "OPEN" && t.Checks.Pending > 0:
 			s += " checks running"
 		}
+	}
+	if t.Linear != "" {
+		s += " · " + t.Linear
 	}
 	return s
 }

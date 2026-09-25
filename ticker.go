@@ -100,7 +100,7 @@ func (t Ticker) gather(st *TickerState, now time.Time) ([]Thread, map[string]Age
 	}
 	threads := make([]Thread, 0, len(active))
 	for _, b := range active {
-		th := Thread{Bead: b}
+		th := Thread{Bead: b, Linear: linearKey(b, t.cfg.LinearPrefixes)}
 		if a, ok := byName[agentName(b.ID)]; ok {
 			th.Agent = &a
 		}

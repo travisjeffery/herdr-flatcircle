@@ -195,6 +195,7 @@ idle_seconds = 60         # it only types into an agent idle this long
 nudge = true              # prompt the coordinator when there's news
 auto_resolve = false      # remove a merged, closed bead's worktree automatically
 repos = { infra = "~/src/infra", model = "~/src/model" }
+linear_prefixes = ["ENG"] # Linear team keys to recognise; empty accepts any KEY-123
 ```
 
 `repo` is the default repository. A bead whose work is in another one carries
@@ -220,6 +221,12 @@ configured repository falls back to `repo` and shows as a warning in
   drops it when the plugin is unlinked, uninstalled or disabled;
   `shepherd unconfigure` stops the ticker and removes the view and sidebar
   tokens by hand.
+- **Linear.** The first issue key (`ENG-1102`) in a bead's title, else its
+  notes, goes in the worker's brief and at the end of its sidebar row
+  (`review · PR #7 · ENG-1102`). `shepherd context` lists where each issue
+  should be (In Review while its PR is open, Done once merged) and flags PR
+  titles missing the key; the coordinator makes the moves or lists them for
+  you.
 - **The coordinator** reads `shepherd context` each turn: an inbox of events,
   every active thread and the beads ready to start.
 

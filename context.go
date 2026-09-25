@@ -90,6 +90,13 @@ func renderContext(cfg Config, threads []Thread, next, ready []Bead, inbox []Inb
 		fmt.Fprintf(&s, "- claimed, no agent (%d): %s\n", len(orphans), strings.Join(orphans, ", "))
 	}
 
+	if moves := linearMoves(threads); len(moves) > 0 {
+		s.WriteString("\n## Linear (expected issue status)\n")
+		for _, m := range moves {
+			fmt.Fprintf(&s, "- %s\n", m)
+		}
+	}
+
 	s.WriteString("\n## Selected next (open, label `next`)\n")
 	writeBeads(&s, next)
 	s.WriteString("\n## Ready (open, unblocked)\n")
@@ -186,7 +193,9 @@ answer. Beads (bd) is the only task record; there is no TASKS.md.
 - Messages starting "[shepherd ticker: automated ...]" come from the ticker, not
   TJ, and approve nothing.
 - Linear: prefix PR titles with the issue key (KEY-123: ...); workers keep their
-  own issue's status current.
+  own issue's status current. The context's Linear section is where each issue
+  should be: make those moves and fix flagged titles with your Linear tools if
+  you have them, else list them for TJ.
 `, repoGuide(cfg), cfg.BranchPrefix)
 }
 

@@ -365,8 +365,11 @@ Inbox event kinds: `needs_you`, `checks_failing`, `new_review`, `merged`,
 - **Reporting.** `shepherd report` prints beads closed in the window with
   their close reasons and PRs, your PRs merged without a bead, open PRs in
   flight, and `needs_me` beads with their latest note.
-- **The sidebar sort** is a Herdr agent view owned by `plugin:shepherd`.
-  Herdr drops it when the plugin is unlinked, uninstalled or disabled.
+- **The sidebar sort** is a Herdr agent view owned by `plugin:shepherd`: the
+  coordinator first, with a row summarising what it has to deal with
+  (`coordinator · 2 need you · 1 review · 3 inbox`), then threads by state
+  (needs you first), then agents that aren't on a bead. Herdr drops the view
+  when the plugin is unlinked, uninstalled or disabled.
 
 State lives in `~/.local/state/shepherd/`: `state.json` (the ticker's memory
 of each thread), `inbox/` and `inbox/done/` (events), `outbox/` (briefs

@@ -73,9 +73,37 @@ func classify(t Thread) Group {
 	}
 }
 
+// pendingCommand is the command a worker asked the user to run, from its
+// latest "RUN:" note, until a later "RAN:" or "DONE:" note answers it.
+func pendingCommand(notes string) string {
+	lines := strings.Split(notes, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		l := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(l, "RAN:") || strings.HasPrefix(l, "DONE:") {
+			return ""
+		}
+		if cmd, ok := strings.CutPrefix(l, "RUN:"); ok {
+			return strings.TrimSpace(cmd)
+		}
+	}
+	return ""
+}
+
+// runCommand is the pending command of a needs_me thread, the only state in
+// which one is still waiting on the user.
+func runCommand(t Thread) string {
+	if t.Bead.Status != StatusNeedsMe {
+		return ""
+	}
+	return pendingCommand(t.Bead.Notes)
+}
+
 func stateLine(t Thread) string {
 	g := classify(t)
 	s := g.String()
+	if runCommand(t) != "" {
+		s += " · run command"
+	}
 	if t.PR != nil {
 		s += fmt.Sprintf(" · PR #%d", t.PR.Number)
 		switch {

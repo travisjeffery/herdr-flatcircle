@@ -17,6 +17,7 @@ type boardRow struct {
 	agent  *Agent
 	line   string
 	color  string
+	run    string
 }
 
 const (
@@ -63,7 +64,7 @@ func loadBoard(cfg Config) ([]boardRow, error) {
 	var rows []boardRow
 	rows = append(rows, boardRow{header: "threads"})
 	for _, th := range threads {
-		rows = append(rows, boardRow{bead: th.Bead, agent: th.Agent, line: stateLine(th), color: groupColor(classify(th))})
+		rows = append(rows, boardRow{bead: th.Bead, agent: th.Agent, line: stateLine(th), color: groupColor(classify(th)), run: runCommand(th)})
 	}
 	next, _ := Beads{}.Next()
 	rows = append(rows, boardRow{header: "next"})
@@ -184,15 +185,30 @@ func runBoard(cfg Config) error {
 			}
 		case "y":
 			if r := sel(); r != nil {
-				cmd := exec.Command("wl-copy", r.bead.ID)
-				if err := cmd.Run(); err != nil {
-					status = "wl-copy: " + err.Error()
-				} else {
-					status = "copied " + r.bead.ID
-				}
+				status = copyText(r.bead.ID, "copied "+r.bead.ID)
+			}
+		case "p":
+			if r := sel(); r != nil && r.run != "" {
+				status = copyText(r.run, "copied the command")
 			}
 		}
 	}
+}
+
+func copyText(text, done string) string {
+	if err := exec.Command("wl-copy", text).Run(); err != nil {
+		return "wl-copy: " + err.Error()
+	}
+	return done
+}
+
+// statusFor is the status line: the last action's message, else the command
+// the selected thread is waiting on the user to run.
+func statusFor(rows []boardRow, cur int, status string) string {
+	if status != "" || cur < 0 || cur >= len(rows) || rows[cur].run == "" {
+		return status
+	}
+	return "run: " + rows[cur].run + "  (p copies)"
 }
 
 func drawBoard(rows []boardRow, cur int, status string) {
@@ -227,8 +243,8 @@ func drawBoard(rows []boardRow, cur int, status string) {
 			fmt.Fprintf(&s, "  %s%s%s%s%s\r\n", id, r.color, state, ansiReset, title)
 		}
 	}
-	fmt.Fprintf(&s, "\x1b[%d;1H%s%s%s", hgt-1, ansiRed, fit(status, w-1), ansiReset)
-	fmt.Fprintf(&s, "\x1b[%d;1H%s%s%s", hgt, ansiDim, fit("↵ focus/start  c claude  x codex  n next  y copy  r refresh  q quit", w-1), ansiReset)
+	fmt.Fprintf(&s, "\x1b[%d;1H%s%s%s", hgt-1, ansiRed, fit(statusFor(rows, cur, status), w-1), ansiReset)
+	fmt.Fprintf(&s, "\x1b[%d;1H%s%s%s", hgt, ansiDim, fit("↵ focus/start  c claude  x codex  n next  y copy  p copy command  r refresh  q quit", w-1), ansiReset)
 	fmt.Print(s.String())
 }
 

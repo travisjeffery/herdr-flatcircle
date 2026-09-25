@@ -212,6 +212,10 @@ auto_resolve = false      # remove a merged, closed bead's worktree automaticall
   drops it when the plugin is unlinked, uninstalled or disabled;
   `shepherd unconfigure` stops the ticker and removes the view and sidebar
   tokens by hand.
+- **Sweep.** `shepherd sweep` lists linked worktrees whose PR merged, whose
+  bead is closed, or that git reports prunable, across every repo; `--yes`
+  removes only the ones that are clean, fully pushed and have no agent in them,
+  and deletes a local branch only when its PR merged.
 - **The coordinator** reads `shepherd context` each turn: an inbox of events,
   every active thread and the beads ready to start.
 

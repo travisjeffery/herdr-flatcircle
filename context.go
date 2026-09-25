@@ -75,7 +75,13 @@ func renderContext(threads []Thread, next, ready []Bead, inbox []InboxItem, st T
 		}
 		fmt.Fprintf(&s, "- %s · %s · %s · %s\n", t.Bead.ID, stateLine(t), agent, shortTitle(t.Bead.Title, 70))
 		if classify(t) == GroupNeedsYou && t.Bead.Status == StatusNeedsMe {
-			fmt.Fprintf(&s, "  question: %s\n", lastNote(t.Bead.Notes, 200))
+			cmd := runCommand(t)
+			if cmd != "" {
+				fmt.Fprintf(&s, "  run: %s\n", cmd)
+			}
+			if q := lastNote(t.Bead.Notes, 200); cmd == "" || !strings.HasPrefix(q, "RUN:") {
+				fmt.Fprintf(&s, "  question: %s\n", q)
+			}
 		}
 		if t.PR != nil {
 			fmt.Fprintf(&s, "  %s\n", t.PR.URL)
@@ -147,6 +153,9 @@ Repository: %[1]s. Workers each get a git worktree on a branch
   prompts.
 - A needs_me bead's question is in its latest note. Relay it to TJ verbatim with
   the options; when they answer, prompt the worker and it resets the status.
+- A needs_me bead with a "RUN:" note is waiting on a command only TJ can run.
+  Relay the command verbatim in a code block, prefixed with `+"`!`"+` so TJ can paste
+  it as is; when they report the result, prompt the worker with it.
 - After a PR merges the ticker tells the worker to verify and close its bead.
   Once closed, run `+"`shepherd resolve <bead>`"+` to remove the worktree (it asks
   nothing and is safe for merged work; don't pass --force without TJ).

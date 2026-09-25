@@ -187,7 +187,7 @@ or start the bead whose id is on the clipboard, if you want keys for those too.
 ```toml
 repo = "~/src/myproject"
 branch_prefix = "tj/"     # worker branches are <prefix><bead>-<slug>
-worker_agent = "claude"   # or "codex"
+worker_agent = "claude"   # "codex", or "auto": whichever has more quota left
 coordinator_agent = "claude"
 tick_seconds = 15         # how often the ticker checks threads
 gh_seconds = 60           # how often it checks PRs
@@ -212,6 +212,10 @@ auto_resolve = false      # remove a merged, closed bead's worktree automaticall
   drops it when the plugin is unlinked, uninstalled or disabled;
   `shepherd unconfigure` stops the ticker and removes the view and sidebar
   tokens by hand.
+- **Commands only you can run** (a classifier denial, an interactive login, a
+  production change) come back as a `RUN: <command>` note on a needs_me bead:
+  the sidebar shows `needs you · run command`, the coordinator relays it ready
+  to paste after `!`, and `p` in the board copies it.
 - **The coordinator** reads `shepherd context` each turn: an inbox of events,
   every active thread and the beads ready to start.
 

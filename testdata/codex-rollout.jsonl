@@ -1,0 +1,5 @@
+{"timestamp":"2026-09-25T12:00:00.000Z","type":"session_meta","payload":{"id":"x"}}
+{"timestamp":"2026-09-25T12:01:00.000Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"limit_id":"codex","primary":{"used_percent":40.0,"window_minutes":10080,"resets_at":1790412777},"secondary":{"used_percent":90.0,"window_minutes":300,"resets_at":1790350000},"plan_type":"pro"}}}
+{"timestamp":"2026-09-25T12:02:00.000Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"limit_id":"codex","primary":{"used_percent":14.0,"window_minutes":10080,"resets_at":1790412777},"secondary":null,"plan_type":"pro"}}}
+{"timestamp":"2026-09-25T12:03:00.000Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":null}}
+{"timestamp":"2026-09-25T12:03:01.000Z","type":"response_item","payload":{"type":"message","content":"no quota here"}}

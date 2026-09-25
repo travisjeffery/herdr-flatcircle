@@ -1,0 +1,1 @@
+{"snapshot":{"provider":"claude","fetched_at_unix":1790346889},"payload":{"session_id":"s1","rate_limits":{"five_hour":{"used_percentage":20,"resets_at":1790359800},"seven_day":{"used_percentage":34,"resets_at":1790744400}}}}

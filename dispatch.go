@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 )
 
 var validKinds = map[string]bool{"claude": true, "codex": true}
@@ -22,6 +23,7 @@ func brief(b Bead, branch, path, instructions string) string {
 - Keep the bead current with ` + "`bd note`" + `: findings, decisions, blockers.
 - When you open a PR, ` + "`bd note " + b.ID + " \"PR: <url>\"`" + ` so the ticker follows it. It will prompt you when checks fail, review feedback lands, or it merges.
 - If you need a human decision: put the exact question and options in a note, run ` + "`bd update " + b.ID + " --status needs_me`" + `, and stop.
+- If a step needs the user to run a command themselves (a permission or classifier denial, an interactive login, a production change they must make): ` + "`bd note " + b.ID + " \"RUN: <exact command>\"`" + `, a one-line note of why, ` + "`bd update " + b.ID + " --status needs_me`" + `, and stop. Once they report the result, continue and ` + "`bd update " + b.ID + " --status in_progress`" + `.
 - Don't close the bead before the PR merges; after it merges, verify and ` + "`bd close " + b.ID + " --reason \"...\"`" + `.
 - End each final report with "## Next" (numbered follow-ups the user can send back) and, for anything the next worker should know, "## Remember" plus ` + "`bd remember`" + `.
 `)
@@ -55,8 +57,11 @@ func dispatch(cfg Config, h Herdr, id string, o DispatchOpts) (string, error) {
 	if kind == "" {
 		kind = cfg.WorkerAgent
 	}
+	if kind == "auto" {
+		kind = autoAgent(time.Now())
+	}
 	if !validKinds[kind] {
-		return "", fmt.Errorf("unknown agent kind %q (claude or codex)", kind)
+		return "", fmt.Errorf("unknown agent kind %q (claude, codex or auto)", kind)
 	}
 	bd := Beads{actor: kind}
 	b, err := bd.Show(id)

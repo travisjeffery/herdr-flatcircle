@@ -37,7 +37,11 @@ type Review struct {
 	} `json:"author"`
 	State       string    `json:"state"`
 	SubmittedAt time.Time `json:"submittedAt"`
+	// Bot is set from the REST API: gh pr view drops the [bot] suffix.
+	Bot bool `json:"bot,omitempty"`
 }
+
+func (r Review) isBot() bool { return r.Bot || strings.HasSuffix(r.Author.Login, "[bot]") }
 
 // listFields stay light: statusCheckRollup across 100 PRs in a repo with many
 // checks per PR makes GitHub's GraphQL time out (504).
@@ -88,11 +92,21 @@ func summarizeChecks(checks []Check) Checks {
 func reviewsNotBy(reviews []Review, login string) int {
 	n := 0
 	for _, r := range reviews {
-		if r.Author.Login != login {
+		if r.Author.Login != login && !r.isBot() {
 			n++
 		}
 	}
 	return n
+}
+
+func botReviews(reviews []Review) []string {
+	var out []string
+	for _, r := range reviews {
+		if r.isBot() {
+			out = append(out, r.Author.Login)
+		}
+	}
+	return out
 }
 
 type GH struct {
@@ -141,6 +155,26 @@ func (g GH) View(url string, detail bool) (PR, error) {
 	}
 	var pr PR
 	return pr, json.Unmarshal(out, &pr)
+}
+
+// MarkBotReviews flags pr's bot reviews, which only the REST API marks.
+func (g GH) MarkBotReviews(pr *PR) error {
+	m := prURL.FindStringSubmatch(pr.URL)
+	if len(pr.Reviews) == 0 || m == nil {
+		return nil
+	}
+	out, err := g.run("api", "--paginate", fmt.Sprintf("repos/%s/pulls/%s/reviews", m[1], m[2]), "--jq", `.[] | select(.user.type == "Bot") | .user.login`)
+	if err != nil {
+		return err
+	}
+	bots := map[string]bool{}
+	for _, l := range strings.Fields(string(out)) {
+		bots[strings.TrimSuffix(l, "[bot]")] = true
+	}
+	for i := range pr.Reviews {
+		pr.Reviews[i].Bot = bots[pr.Reviews[i].Author.Login]
+	}
+	return nil
 }
 
 // prForBead picks the PR a bead is being delivered through: one on the bead's

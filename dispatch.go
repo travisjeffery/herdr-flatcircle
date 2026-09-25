@@ -23,6 +23,7 @@ func brief(b Bead, branch, path, instructions string) string {
 - When you open a PR, ` + "`bd note " + b.ID + " \"PR: <url>\"`" + ` so the ticker follows it. It will prompt you when checks fail, review feedback lands, or it merges.
 - If you need a human decision: put the exact question and options in a note, run ` + "`bd update " + b.ID + " --status needs_me`" + `, and stop.
 - Don't close the bead before the PR merges; after it merges, verify and ` + "`bd close " + b.ID + " --reason \"...\"`" + `.
+- If steps remain after the merge (a deploy dispatch, canary, provision, rollout), ` + "`bd label add " + b.ID + " rolling-out`" + ` and note each Actions run URL so the ticker follows it; remove the label with ` + "`bd label remove " + b.ID + " rolling-out`" + ` when the rollout is finished, then close.
 - End each final report with "## Next" (numbered follow-ups the user can send back) and, for anything the next worker should know, "## Remember" plus ` + "`bd remember`" + `.
 `)
 	if strings.TrimSpace(instructions) != "" {

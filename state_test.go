@@ -218,3 +218,141 @@ func TestParseOpened(t *testing.T) {
 		t.Fatal("missing pane must be an error")
 	}
 }
+
+func TestNotedRuns(t *testing.T) {
+	notes := strings.Join([]string{
+		"deploy: https://github.com/acme/app/actions/runs/1",
+		"canary https://github.com/acme/app/actions/runs/2/job/77",
+		"provision https://github.com/acme/infra/actions/runs/3/attempts/2",
+		"rollout https://github.com/acme/app/actions/runs/4",
+		"retried https://github.com/acme/app/actions/runs/2/attempts/2",
+	}, "\n")
+	want := []string{
+		"https://github.com/acme/infra/actions/runs/3",
+		"https://github.com/acme/app/actions/runs/4",
+		"https://github.com/acme/app/actions/runs/2",
+	}
+	if got := NotedRuns(notes); !slices.Equal(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	if got := NotedRuns("PR: https://github.com/acme/app/pull/1"); len(got) != 0 {
+		t.Fatalf("a PR link is not a run: %v", got)
+	}
+}
+
+func deployRun(status, conclusion string) Run {
+	return Run{ID: 42, Status: status, Conclusion: conclusion, Workflow: "Deploy", URL: "https://github.com/acme/app/actions/runs/42", Repo: "acme/app"}
+}
+
+func runThread(r Run) Thread {
+	th := thread(bead(StatusInProgress), agent("idle", 1), &PR{Number: 7, State: "MERGED"})
+	th.Runs = []Run{r}
+	return th
+}
+
+func TestRunFirstSightIsNotAChange(t *testing.T) {
+	th := runThread(deployRun("completed", "failure"))
+	if o := transition(th, Snapshot{PRNumber: 7, PRState: "MERGED"}, false, t0); len(o.Events) != 0 || len(o.Prompts) != 0 || o.Notify {
+		t.Fatalf("a newly noted run produced %+v", o)
+	}
+}
+
+func TestRunSucceededPromptsNextStep(t *testing.T) {
+	running := runThread(deployRun("in_progress", ""))
+	prev := snapshot(running, Snapshot{PRNumber: 7, PRState: "MERGED"}, t0)
+	done := runThread(deployRun("completed", "success"))
+	o := transition(done, prev, false, t0)
+	if len(o.Events) != 1 || o.Events[0].Kind != EventRunSucceeded || o.Notify {
+		t.Fatalf("want one run_succeeded event and no notification, got %+v", o)
+	}
+	want := "[shepherd: automated, not the user] Deploy run https://github.com/acme/app/actions/runs/42 succeeded. Continue with the next step of the rollout."
+	if len(o.Prompts) != 1 || o.Prompts[0] != want {
+		t.Fatalf("got prompts %q", o.Prompts)
+	}
+	if o := transition(done, snapshot(done, prev, t0), false, t0.Add(time.Minute)); len(o.Events) != 0 || len(o.Prompts) != 0 {
+		t.Fatalf("a finished run was re-announced: %+v", o)
+	}
+}
+
+func TestRunFailedNotifiesAndPromptsInvestigation(t *testing.T) {
+	for _, conclusion := range []string{"failure", "cancelled", "timed_out"} {
+		prev := snapshot(runThread(deployRun("queued", "")), Snapshot{PRNumber: 7, PRState: "MERGED"}, t0)
+		o := transition(runThread(deployRun("completed", conclusion)), prev, false, t0)
+		if len(o.Events) != 1 || o.Events[0].Kind != EventRunFailed || !o.Notify {
+			t.Fatalf("%s: want a notified run_failed event, got %+v", conclusion, o)
+		}
+		if len(o.Prompts) != 1 || !strings.Contains(o.Prompts[0], "`gh run view 42 -R acme/app --log-failed`") {
+			t.Fatalf("%s: got prompts %q", conclusion, o.Prompts)
+		}
+	}
+}
+
+func TestStateLineShowsRunningWorkflow(t *testing.T) {
+	th := runThread(deployRun("in_progress", ""))
+	if got := stateLine(th); got != "merged · PR #7 · Deploy running" {
+		t.Errorf("got %q", got)
+	}
+	if got := stateLine(runThread(deployRun("completed", "success"))); got != "merged · PR #7" {
+		t.Errorf("a finished run is not running: %q", got)
+	}
+}
+
+func TestRollingOutAfterMerge(t *testing.T) {
+	b := bead(StatusInProgress)
+	b.Labels = []string{LabelRollingOut}
+	th := thread(b, agent("idle", 1), &PR{Number: 7, State: "MERGED"})
+	if got := classify(th); got != GroupRollingOut {
+		t.Fatalf("got %s, want %s", got, GroupRollingOut)
+	}
+	if got := classify(thread(b, agent("idle", 1), openPR())); got != GroupReview {
+		t.Fatalf("an unmerged rolling-out bead is still in review, got %s", got)
+	}
+	if !(GroupReview < GroupRollingOut && GroupRollingOut < GroupFailing) {
+		t.Fatal("rolling out sorts right after review")
+	}
+	o := transition(th, Snapshot{PRNumber: 7, PRState: "OPEN"}, false, t0)
+	if len(o.Prompts) != 1 {
+		t.Fatalf("want one merge prompt, got %q", o.Prompts)
+	}
+	p := o.Prompts[0]
+	if !strings.Contains(p, "Continue the rollout") || !strings.Contains(p, "bd label remove backend-ab12 rolling-out") ||
+		!strings.Contains(p, "bd close backend-ab12") || strings.Contains(p, "and stop") {
+		t.Fatalf("merge prompt should continue the rollout, not close now: %q", p)
+	}
+}
+
+func TestBotAndHumanReviews(t *testing.T) {
+	prev := Snapshot{PRNumber: 7, PRState: "OPEN", Reviews: 1, BotReviews: 1}
+	bot := thread(bead(StatusInProgress), agent("idle", 1), openPR())
+	bot.Reviews, bot.BotReviews = 1, []string{"chatgpt-codex-connector", "coderabbitai"}
+	o := transition(bot, prev, false, t0)
+	if o.Notify || len(o.Events) != 1 || o.Events[0].Summary != "PR #7 has a new review from coderabbitai" {
+		t.Fatalf("a bot review is an unnotified event naming the bot, got %+v", o)
+	}
+	if len(o.Prompts) != 1 || !strings.Contains(o.Prompts[0], "new review from coderabbitai") {
+		t.Fatalf("got prompts %q", o.Prompts)
+	}
+	human := thread(bead(StatusInProgress), agent("idle", 1), openPR())
+	human.Reviews, human.BotReviews = 2, []string{"chatgpt-codex-connector"}
+	o = transition(human, prev, false, t0)
+	if !o.Notify || len(o.Events) != 1 || o.Events[0].Summary != "PR #7 has new human review feedback" {
+		t.Fatalf("a human review notifies, got %+v", o)
+	}
+	if len(o.Prompts) != 1 || !strings.Contains(o.Prompts[0], "new human review feedback") {
+		t.Fatalf("got prompts %q", o.Prompts)
+	}
+}
+
+func TestBotReviewsSplitFromHumans(t *testing.T) {
+	reviews := []Review{{State: "APPROVED"}, {State: "COMMENTED", Bot: true}, {State: "COMMENTED"}, {State: "COMMENTED"}}
+	reviews[0].Author.Login = "alice"
+	reviews[1].Author.Login = "chatgpt-codex-connector"
+	reviews[2].Author.Login = "travisjeffery"
+	reviews[3].Author.Login = "renovate[bot]"
+	if n := reviewsNotBy(reviews, "travisjeffery"); n != 1 {
+		t.Errorf("human reviews: got %d, want 1", n)
+	}
+	if got := botReviews(reviews); !slices.Equal(got, []string{"chatgpt-codex-connector", "renovate[bot]"}) {
+		t.Errorf("bot reviews: got %v", got)
+	}
+}

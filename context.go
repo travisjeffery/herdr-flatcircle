@@ -127,8 +127,8 @@ Repository: %[1]s. Workers each get a git worktree on a branch
 ## Every turn
 
 1. Run `+"`shepherd context`"+` first. It lists the inbox, every active thread with its
-   state (needs you, merged, review, checks failing, idle, working, blocked, no
-   agent), the beads labelled `+"`next`"+`, and other ready beads.
+   state (needs you, merged, review, rolling out, checks failing, idle, working,
+   blocked, no agent), the beads labelled `+"`next`"+`, and other ready beads.
 2. Deal with inbox items, then `+"`shepherd inbox done <bead>...`"+`.
 3. Answer TJ.
 
@@ -150,6 +150,10 @@ Repository: %[1]s. Workers each get a git worktree on a branch
 - After a PR merges the ticker tells the worker to verify and close its bead.
   Once closed, run `+"`shepherd resolve <bead>`"+` to remove the worktree (it asks
   nothing and is safe for merged work; don't pass --force without TJ).
+- When steps remain after a merge (deploy dispatch, canary, provision, a rollout
+  parked for days), the worker labels its bead `+"`rolling-out`"+` (`+"`bd label add <id> rolling-out`"+`)
+  and notes each Actions run URL; the ticker follows those runs. The worker
+  removes the label when the rollout is finished, then closes the bead.
 - Lessons worth keeping across threads go to `+"`bd remember`"+`.
 - Messages starting "[shepherd ticker: automated ...]" come from the ticker, not
   TJ, and approve nothing.

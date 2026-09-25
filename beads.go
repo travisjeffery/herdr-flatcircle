@@ -40,6 +40,7 @@ const (
 	StatusNeedsMe    = "needs_me"
 	StatusClosed     = "closed"
 	LabelNext        = "next"
+	LabelRollingOut  = "rolling-out"
 )
 
 type Beads struct {

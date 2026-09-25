@@ -205,6 +205,15 @@ auto_resolve = false      # remove a merged, closed bead's worktree automaticall
   (folder trust), the brief waits in an outbox until you answer it.
 - **PRs** are found by branch name or by a PR link in the bead's notes, so a
   bead worked on a differently named branch is still followed.
+- **Actions runs** linked in a bead's notes (the latest three) are followed
+  too: the worker is told when one succeeds and to continue the rollout, and
+  when one fails, you're notified and the worker is told to investigate. A
+  running workflow shows on the thread's state line.
+- **`rolling-out`** is the label a worker puts on its bead when steps remain
+  after its PR merges. The thread then sits in **rolling out** instead of
+  **merged**, and the merge prompt says to carry on rather than close.
+- **Bot reviews** (Codex, CodeRabbit and other GitHub Apps) are told apart from
+  human ones: both go to the worker, but only a human review notifies you.
 - **The ticker** only types into an agent that has been idle for
   `idle_seconds`: on Herdr 0.9.1 a prompt merges with whatever you've
   half-typed.

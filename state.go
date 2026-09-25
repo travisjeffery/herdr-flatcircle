@@ -15,6 +15,7 @@ const (
 	GroupNeedsYou Group = iota
 	GroupMerged
 	GroupReview
+	GroupRollingOut
 	GroupFailing
 	GroupIdle
 	GroupWorking
@@ -23,25 +24,28 @@ const (
 )
 
 var groupNames = map[Group]string{
-	GroupNeedsYou: "needs you",
-	GroupMerged:   "merged",
-	GroupReview:   "review",
-	GroupFailing:  "checks failing",
-	GroupIdle:     "idle",
-	GroupWorking:  "working",
-	GroupBlocked:  "blocked",
-	GroupNoAgent:  "no agent",
+	GroupNeedsYou:   "needs you",
+	GroupMerged:     "merged",
+	GroupReview:     "review",
+	GroupRollingOut: "rolling out",
+	GroupFailing:    "checks failing",
+	GroupIdle:       "idle",
+	GroupWorking:    "working",
+	GroupBlocked:    "blocked",
+	GroupNoAgent:    "no agent",
 }
 
 func (g Group) String() string { return groupNames[g] }
 
 // Thread is one bead with whatever is working on it and delivering it.
 type Thread struct {
-	Bead    Bead
-	Agent   *Agent
-	PR      *PR
-	Checks  Checks
-	Reviews int // reviews by someone other than the user
+	Bead       Bead
+	Agent      *Agent
+	PR         *PR
+	Checks     Checks
+	Reviews    int // human reviews by someone other than the user
+	BotReviews []string
+	Runs       []Run
 }
 
 func agentReady(a *Agent) bool {
@@ -55,6 +59,8 @@ func classify(t Thread) Group {
 	switch {
 	case t.Bead.Status == StatusNeedsMe, t.Agent != nil && t.Agent.Status == "blocked":
 		return GroupNeedsYou
+	case t.PR != nil && t.PR.State == "MERGED" && t.Bead.HasLabel(LabelRollingOut):
+		return GroupRollingOut
 	case t.PR != nil && t.PR.State == "MERGED":
 		return GroupMerged
 	case t.PR != nil && t.PR.State == "OPEN" && len(t.Checks.Failing) > 0:
@@ -88,31 +94,40 @@ func stateLine(t Thread) string {
 			s += " checks running"
 		}
 	}
+	for _, r := range t.Runs {
+		if r.Status != "completed" {
+			s += " · " + r.Workflow + " running"
+		}
+	}
 	return s
 }
 
 // Snapshot is what the ticker remembers about a bead between ticks.
 type Snapshot struct {
-	Group       Group     `json:"group"`
-	AgentStatus string    `json:"agent_status"`
-	AgentSeq    int64     `json:"agent_seq"`
-	ReadySince  time.Time `json:"ready_since"`
-	PRNumber    int       `json:"pr_number"`
-	PRState     string    `json:"pr_state"`
-	Failing     []string  `json:"failing"`
-	Reviews     int       `json:"reviews"`
-	Pending     []string  `json:"pending_prompts"`
+	Group       Group             `json:"group"`
+	AgentStatus string            `json:"agent_status"`
+	AgentSeq    int64             `json:"agent_seq"`
+	ReadySince  time.Time         `json:"ready_since"`
+	PRNumber    int               `json:"pr_number"`
+	PRState     string            `json:"pr_state"`
+	Failing     []string          `json:"failing"`
+	Reviews     int               `json:"reviews"`
+	BotReviews  int               `json:"bot_reviews"`
+	Runs        map[string]string `json:"runs,omitempty"`
+	Pending     []string          `json:"pending_prompts"`
 }
 
 type EventKind string
 
 const (
-	EventNeedsYou  EventKind = "needs_you"
-	EventFailing   EventKind = "checks_failing"
-	EventReview    EventKind = "new_review"
-	EventMerged    EventKind = "merged"
-	EventFinished  EventKind = "finished"
-	EventAgentGone EventKind = "agent_gone"
+	EventNeedsYou     EventKind = "needs_you"
+	EventFailing      EventKind = "checks_failing"
+	EventReview       EventKind = "new_review"
+	EventMerged       EventKind = "merged"
+	EventFinished     EventKind = "finished"
+	EventAgentGone    EventKind = "agent_gone"
+	EventRunSucceeded EventKind = "run_succeeded"
+	EventRunFailed    EventKind = "run_failed"
 )
 
 type Event struct {
@@ -131,7 +146,7 @@ type Outcome struct {
 }
 
 func snapshot(t Thread, prev Snapshot, now time.Time) Snapshot {
-	s := Snapshot{Group: classify(t), Reviews: t.Reviews, Failing: t.Checks.Failing, Pending: prev.Pending}
+	s := Snapshot{Group: classify(t), Reviews: t.Reviews, BotReviews: len(t.BotReviews), Runs: runStates(t.Runs), Failing: t.Checks.Failing, Pending: prev.Pending}
 	if t.Agent != nil {
 		s.AgentStatus, s.AgentSeq = t.Agent.Status, t.Agent.Seq
 		switch {
@@ -175,20 +190,48 @@ func transition(t Thread, prev Snapshot, first bool, now time.Time) Outcome {
 				"[shepherd: automated, not the user] PR #%d has failing checks: %s. Investigate with `gh pr checks %d`, fix them on this branch, and push.",
 				t.PR.Number, strings.Join(t.Checks.Failing, ", "), t.PR.Number))
 		}
-		if t.Reviews > prev.Reviews && prev.PRNumber == t.PR.Number {
-			ev(EventReview, "PR #%d has new review feedback", t.PR.Number)
+		review := func(what string) {
+			ev(EventReview, "PR #%d has %s", t.PR.Number, what)
 			o.Prompts = append(o.Prompts, fmt.Sprintf(
-				"[shepherd: automated, not the user] PR #%d has new review feedback. Read it with `gh pr view %d --comments` and the review threads; fix what is valid, reply to what is not, and push.",
-				t.PR.Number, t.PR.Number))
+				"[shepherd: automated, not the user] PR #%d has %s. Read it with `gh pr view %d --comments` and the review threads; fix what is valid, reply to what is not, and push.",
+				t.PR.Number, what, t.PR.Number))
+		}
+		samePR := prev.PRNumber == t.PR.Number
+		if t.Reviews > prev.Reviews && samePR {
+			o.Notify = true
+			review("new human review feedback")
+		}
+		// Snapshots from before bots were told apart counted them as human
+		// reviews; an unchanged total is not a new bot review.
+		if len(t.BotReviews) > prev.BotReviews && t.Reviews+len(t.BotReviews) > prev.Reviews+prev.BotReviews && samePR {
+			review("a new review from " + strings.Join(slices.Compact(slices.Sorted(slices.Values(t.BotReviews[prev.BotReviews:]))), ", "))
 		}
 	}
 	if t.PR != nil && t.PR.State == "MERGED" && prev.PRState != "MERGED" {
 		o.Notify = true
 		ev(EventMerged, "PR #%d merged", t.PR.Number)
-		if t.Bead.Status != StatusClosed {
+		if t.Bead.HasLabel(LabelRollingOut) {
+			o.Prompts = append(o.Prompts, fmt.Sprintf(
+				"[shepherd: automated, not the user] PR #%d merged. Continue the rollout with its next step. When the rollout is finished and verified, remove the label with `bd label remove %s %s`, then close the bead with `bd close %s --reason \"<what shipped and how it was verified>\"`.",
+				t.PR.Number, id, LabelRollingOut, id))
+		} else if t.Bead.Status != StatusClosed {
 			o.Prompts = append(o.Prompts, fmt.Sprintf(
 				"[shepherd: automated, not the user] PR #%d merged. Verify what needs verifying after merge, then close the bead with `bd close %s --reason \"<what shipped and how it was verified>\"` and stop.",
 				t.PR.Number, id))
+		}
+	}
+	for _, r := range finishedRuns(t.Runs, prev.Runs) {
+		switch {
+		case r.Conclusion == "success":
+			ev(EventRunSucceeded, "%s run %d succeeded", r.Workflow, r.ID)
+			o.Prompts = append(o.Prompts, fmt.Sprintf(
+				"[shepherd: automated, not the user] %s run %s succeeded. Continue with the next step of the rollout.", r.Workflow, r.URL))
+		case runFailed(r):
+			o.Notify = true
+			ev(EventRunFailed, "%s run %d ended %s", r.Workflow, r.ID, r.Conclusion)
+			o.Prompts = append(o.Prompts, fmt.Sprintf(
+				"[shepherd: automated, not the user] %s run %s ended %s. Investigate with `gh run view %d -R %s --log-failed`, fix what is wrong, and carry on with the rollout.",
+				r.Workflow, r.URL, r.Conclusion, r.ID, r.Repo))
 		}
 	}
 	// A whole turn can fit between two ticks; a moved state counter on a ready

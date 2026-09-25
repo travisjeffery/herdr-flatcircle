@@ -101,6 +101,40 @@ nudges the coordinator; the coordinator reads the inbox through
    `closed` event, and the coordinator runs `shepherd resolve` to remove the
    worktree.
 
+### Finishing a thread
+
+Usually there's nothing to do. When a worker's PR merges, the ticker tells it
+to verify and close its bead (`bd close <id> --reason "<what shipped and how
+it was verified>"`). A `rolling-out` bead is finished first, then closed. The
+ticker sees the bead close and writes a `closed` event, and the coordinator
+runs `shepherd resolve <bead>`: that removes the bead's worktree and its
+workspace, closing the worker's pane, and deletes the local branch if the PR
+merged. With `auto_resolve = true` the ticker resolves on its own once the PR
+has merged, the bead is closed and the agent is idle.
+
+By hand:
+
+| Situation | Do this |
+|---|---|
+| Done without a PR (an investigation, an ops task) | `bd close <id> --reason "…"`, then `shepherd resolve <id>` |
+| Dropping the work | `bd close <id> --reason "dropped: …"`, or `bd update <id> --status deferred` to park it; then `shepherd resolve <id> --force` if nothing in the worktree is worth keeping |
+| Done, but you want the worktree a while longer | Close the bead and resolve it later |
+| Finished worktrees have piled up | `shepherd sweep`, then `shepherd sweep --yes` to remove the safe ones |
+| Claims nobody is going to finish | `shepherd stale`, then `shepherd stale --release` to reopen them |
+
+`resolve` refuses while the bead is still open or its agent is working, unless
+you pass `--force`, and it only ever removes a linked worktree on that bead's
+branch, never the main checkout. If the worker ran somewhere other than its
+own worktree, there's nothing to remove; close its pane.
+
+When you close something, also:
+
+- save anything the next worker should know with `bd remember "…"`; every new
+  session loads it at start-up;
+- mark its inbox items handled (`shepherd inbox done <bead>`) if you dealt
+  with it without the coordinator;
+- move its Linear issue to Done (`shepherd context` lists the moves due).
+
 ### Messages
 
 Every automated message says it isn't from you, and none approves anything.

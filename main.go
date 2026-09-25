@@ -19,6 +19,7 @@ Usage:
   shepherd focus [<bead>] [--agent K]           focus the bead's worker, else dispatch it
                                                 (no bead: read it from the clipboard)
   shepherd context                              the coordinator's per-turn digest
+  shepherd report [--since 24h|7d|YYYY-MM-DD]   Markdown of what shipped, merged, is in flight, needs you
   shepherd inbox done [<bead>...]               mark inbox items handled (all if none given)
   shepherd resolve <bead> [--force]             remove a finished bead's worktree and merged branch
   shepherd board                                the board (runs as the plugin popup)
@@ -67,6 +68,7 @@ func run(args []string) error {
 	kind := fs.String("agent", "", "agent kind: claude or codex")
 	focus := fs.Bool("focus", false, "focus the new workspace")
 	force := fs.Bool("force", false, "resolve even if the bead is open or its agent is working")
+	sinceFlag := fs.String("since", "24h", "report window: Nh, Nd or YYYY-MM-DD")
 	pos, err := interspersed(fs, rest)
 	if err != nil {
 		return err
@@ -122,6 +124,17 @@ func run(args []string) error {
 		ready, _ := Beads{}.Ready()
 		inbox, _ := readInbox()
 		fmt.Print(renderContext(cfg, threads, next, ready, inbox, st, time.Now()))
+	case "report":
+		now := time.Now()
+		since, err := parseSince(*sinceFlag, now)
+		if err != nil {
+			return err
+		}
+		r, err := gatherReport(cfg, since)
+		if err != nil {
+			return err
+		}
+		fmt.Print(renderReport(r, now))
 	case "inbox":
 		if len(pos) == 0 || pos[0] != "done" {
 			return fmt.Errorf("usage: shepherd inbox done [<bead>...]")

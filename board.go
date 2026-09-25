@@ -35,7 +35,7 @@ func groupColor(g Group) string {
 	switch g {
 	case GroupNeedsYou, GroupFailing:
 		return ansiRed
-	case GroupReview, GroupMerged:
+	case GroupReview, GroupMerged, GroupRollingOut:
 		return ansiYellow
 	case GroupWorking:
 		return ansiGreen

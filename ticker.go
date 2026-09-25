@@ -20,7 +20,8 @@ import (
 type TickerState struct {
 	Threads      map[string]Snapshot `json:"threads"`
 	LastGH       time.Time           `json:"last_gh"`
-	PRs          map[string]PR       `json:"prs"` // by bead id, from the last gh pass
+	PRs          map[string]PR       `json:"prs"`  // by bead id, from the last gh pass
+	Runs         map[string][]Run    `json:"runs"` // by bead id, from the last gh pass
 	LastNudge    time.Time           `json:"last_nudge"`
 	Login        string              `json:"login"`
 	CoordReady   time.Time           `json:"coord_ready"`
@@ -96,6 +97,7 @@ func (t Ticker) gather(st *TickerState, now time.Time) ([]Thread, map[string]Age
 	}
 	if now.Sub(st.LastGH) >= t.cfg.ghEvery() {
 		t.refreshPRs(st, active)
+		t.refreshRuns(st, active)
 		st.LastGH = now
 	}
 	threads := make([]Thread, 0, len(active))
@@ -108,7 +110,9 @@ func (t Ticker) gather(st *TickerState, now time.Time) ([]Thread, map[string]Age
 			th.PR = &pr
 			th.Checks = summarizeChecks(pr.Checks)
 			th.Reviews = reviewsNotBy(pr.Reviews, st.Login)
+			th.BotReviews = botReviews(pr.Reviews)
 		}
+		th.Runs = st.Runs[b.ID]
 		threads = append(threads, th)
 	}
 	return threads, byName, nil
@@ -162,7 +166,11 @@ func (t Ticker) refreshPRs(st *TickerState, active []Bead) {
 			continue
 		}
 		if pr.State == "OPEN" {
-			if full, err := t.gh.View(pr.URL, true); err == nil {
+			full, err := t.gh.View(pr.URL, true)
+			if err == nil {
+				err = t.gh.MarkBotReviews(&full)
+			}
+			if err == nil {
 				pr = full
 			} else {
 				t.log.Printf("gh pr view %d: %v", pr.Number, err)

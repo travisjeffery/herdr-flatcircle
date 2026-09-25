@@ -39,7 +39,7 @@ func TestStateLineEndsWithLinearKey(t *testing.T) {
 }
 
 func linearSection(threads []Thread) string {
-	out := renderContext(Config{Repo: "/r"}, threads, nil, nil, nil, TickerState{}, t0)
+	out := renderContext(Config{Repo: "/r"}, threads, nil, nil, nil, TickerState{}, nil, t0)
 	_, sec, ok := strings.Cut(out, "## Linear")
 	if !ok {
 		return ""
@@ -68,7 +68,7 @@ func TestContextLinearSection(t *testing.T) {
 
 func TestContextLinearSectionOmittedWithoutKeys(t *testing.T) {
 	th := thread(bead(StatusInProgress), agent("idle", 1), openPR())
-	if out := renderContext(Config{Repo: "/r"}, []Thread{th}, nil, nil, nil, TickerState{}, t0); strings.Contains(out, "## Linear") {
+	if out := renderContext(Config{Repo: "/r"}, []Thread{th}, nil, nil, nil, TickerState{}, nil, t0); strings.Contains(out, "## Linear") {
 		t.Errorf("got a Linear section:\n%s", out)
 	}
 }

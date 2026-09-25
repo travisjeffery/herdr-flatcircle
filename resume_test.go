@@ -1,0 +1,158 @@
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+)
+
+var resumeCfg = Config{Repo: "/r", BranchPrefix: "tj/", WorkerAgent: "claude"}
+
+func ids(beads []Bead) []string {
+	var out []string
+	for _, b := range beads {
+		out = append(out, b.ID)
+	}
+	return out
+}
+
+func TestBeadWorktreeMatchesOwnBranchOrPRHead(t *testing.T) {
+	b := Bead{ID: "backend-ab12", Title: "Fix the thing"}
+	own := Worktree{Branch: "tj/backend-ab12-fix-the-thing", Path: "/w/own", Linked: true}
+	moved := Worktree{Branch: "tj/renamed", Path: "/w/moved", Linked: true}
+	checkout := Worktree{Branch: "tj/backend-ab12-fix-the-thing", Path: "/r"}
+	if w, ok := beadWorktree(resumeCfg, b, nil, []Worktree{checkout, own}); !ok || w.Path != "/w/own" {
+		t.Fatalf("own branch: %+v %v; the main checkout must never match", w, ok)
+	}
+	prs := map[string]PR{b.ID: {Head: "tj/renamed"}}
+	if w, ok := beadWorktree(resumeCfg, b, prs, []Worktree{moved}); !ok || w.Path != "/w/moved" {
+		t.Fatalf("PR head: %+v %v", w, ok)
+	}
+	if _, ok := beadWorktree(resumeCfg, b, nil, []Worktree{moved}); ok {
+		t.Fatal("an unrelated branch matched")
+	}
+}
+
+func TestOrphansSkipLiveAgentsAndSplitOnWorktree(t *testing.T) {
+	beads := []Bead{
+		{ID: "backend-live", Title: "a"},
+		{ID: "backend-wt.1", Title: "b"},
+		{ID: "backend-none", Title: "c"},
+	}
+	calls := 0
+	list := cachedWorktrees(func(repo string) ([]Worktree, error) {
+		calls++
+		return []Worktree{
+			{Branch: "tj/backend-live-a", Linked: true},
+			{Branch: "tj/backend-wt-1-b", Linked: true, WorkspaceID: "w3"},
+		}, nil
+	})
+	res, bare, err := orphans(resumeCfg, beads, map[string]bool{"backend-live": true}, nil, list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 1 || res[0].Bead.ID != "backend-wt.1" || res[0].Worktree.WorkspaceID != "w3" {
+		t.Fatalf("resumable: %+v", res)
+	}
+	if !slices.Equal(ids(bare), []string{"backend-none"}) {
+		t.Fatalf("bare: %v", ids(bare))
+	}
+	if calls != 1 {
+		t.Fatalf("listed worktrees %d times for one repo", calls)
+	}
+}
+
+func TestStaleClaimsAreOldInProgressOnly(t *testing.T) {
+	old := t0.Add(-8 * 24 * time.Hour)
+	bare := []Bead{
+		{ID: "old", Status: StatusInProgress, UpdatedAt: old},
+		{ID: "young", Status: StatusInProgress, UpdatedAt: t0.Add(-6 * 24 * time.Hour)},
+		{ID: "old-blocked", Status: StatusBlocked, UpdatedAt: old},
+		{ID: "old-needs-me", Status: StatusNeedsMe, UpdatedAt: old},
+		{ID: "old-merged", Status: StatusInProgress, UpdatedAt: old},
+	}
+	prs := map[string]PR{"old-merged": {Number: 7, State: "MERGED"}}
+	if got := ids(staleClaims(bare, prs, t0, 7*24*time.Hour)); !slices.Equal(got, []string{"old"}) {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestPickResumable(t *testing.T) {
+	res := []Resumable{{Bead: Bead{ID: "a"}}, {Bead: Bead{ID: "b"}}}
+	if got, missing := pickResumable(res, nil); len(got) != 2 || missing != nil {
+		t.Fatalf("no names should pick all: %v %v", got, missing)
+	}
+	got, missing := pickResumable(res, []string{"b", "zz"})
+	if len(got) != 1 || got[0].Bead.ID != "b" || !slices.Equal(missing, []string{"zz"}) {
+		t.Fatalf("got %v missing %v", got, missing)
+	}
+}
+
+func TestResumeKind(t *testing.T) {
+	codexClaimed := Bead{Assignee: "codex"}
+	cases := []struct {
+		b    Bead
+		kind string
+		want string
+	}{
+		{codexClaimed, "claude", "claude"},
+		{codexClaimed, "", "codex"},
+		{Bead{Assignee: "tj"}, "", "claude"},
+	}
+	for _, c := range cases {
+		if got := resumeKind(resumeCfg, c.b, c.kind); got != c.want {
+			t.Errorf("resumeKind(%q, %q) = %q, want %q", c.b.Assignee, c.kind, got, c.want)
+		}
+	}
+}
+
+func TestFreePaneSkipsAgentPanes(t *testing.T) {
+	if p, ok := freePane([]Pane{{ID: "w1:p1", Agent: "claude"}, {ID: "w1:p2"}}); !ok || p != "w1:p2" {
+		t.Fatalf("got %q %v", p, ok)
+	}
+	if _, ok := freePane([]Pane{{ID: "w1:p1", Agent: "codex"}}); ok {
+		t.Fatal("an agent's pane was offered")
+	}
+}
+
+func TestAgentStartPassesResumeArgsAfterDashes(t *testing.T) {
+	dir := t.TempDir()
+	argv := filepath.Join(dir, "argv")
+	bin := filepath.Join(dir, "herdr")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argv + "\necho '{\"result\":{}}'\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := (Herdr{bin: bin}).AgentStart("backend-ab12", "codex", "w1:p1", resumeArgs["codex"]...); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(argv)
+	want := "agent start backend-ab12 --kind codex --pane w1:p1 --timeout 30000 -- resume --last"
+	if s := strings.Join(strings.Fields(string(got)), " "); s != want {
+		t.Fatalf("got %q, want %q", s, want)
+	}
+}
+
+func TestContextSplitsNoAgentThreads(t *testing.T) {
+	t.Setenv("SHEPHERD_STATE_DIR", t.TempDir())
+	threads := []Thread{
+		{Bead: Bead{ID: "backend-wt", Status: StatusInProgress, UpdatedAt: t0.Add(-time.Hour)}},
+		{Bead: Bead{ID: "backend-old", Status: StatusInProgress, UpdatedAt: t0.Add(-30 * 24 * time.Hour)}},
+		{Bead: Bead{ID: "backend-older", Status: StatusInProgress, UpdatedAt: t0.Add(-40 * 24 * time.Hour)}},
+	}
+	out := renderContext(Config{Repo: "/r"}, threads, nil, nil, nil, TickerState{}, map[string]bool{"backend-wt": true}, t0)
+	for _, want := range []string{
+		"- resumable (1): backend-wt  → shepherd resume\n",
+		"- stale claims (2): backend-old, backend-older — no agent, no worktree, untouched 30d+\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if out := renderContext(Config{Repo: "/r"}, threads, nil, nil, nil, TickerState{}, nil, t0); !strings.Contains(out, "- claimed, no agent (3): ") {
+		t.Errorf("unknown worktrees should not call anything stale:\n%s", out)
+	}
+}

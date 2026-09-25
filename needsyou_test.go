@@ -38,12 +38,12 @@ func TestStateLineRunCommand(t *testing.T) {
 func TestContextShowsTheCommandToRun(t *testing.T) {
 	b := bead(StatusNeedsMe)
 	b.Notes = "RUN: aws sso login --profile admin"
-	out := renderContext(Config{Repo: "/r"}, []Thread{thread(b, agent("idle", 1), nil)}, nil, nil, nil, TickerState{}, t0)
+	out := renderContext(Config{Repo: "/r"}, []Thread{thread(b, agent("idle", 1), nil)}, nil, nil, nil, TickerState{}, nil, t0)
 	if !strings.Contains(out, "\n  run: aws sso login --profile admin\n") || strings.Contains(out, "question:") {
 		t.Fatalf("want the run line alone when the RUN note is the latest:\n%s", out)
 	}
 	b.Notes += "\nwhy: the token expired"
-	out = renderContext(Config{Repo: "/r"}, []Thread{thread(b, agent("idle", 1), nil)}, nil, nil, nil, TickerState{}, t0)
+	out = renderContext(Config{Repo: "/r"}, []Thread{thread(b, agent("idle", 1), nil)}, nil, nil, nil, TickerState{}, nil, t0)
 	if !strings.Contains(out, "  run: aws sso login --profile admin\n  question: why: the token expired\n") {
 		t.Fatalf("want the run line then the latest note:\n%s", out)
 	}

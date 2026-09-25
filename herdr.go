@@ -169,9 +169,30 @@ func (h Herdr) TabRename(tab, label string) error {
 	return err
 }
 
-func (h Herdr) AgentStart(name, kind, pane string) error {
-	_, err := h.call(40*time.Second, "agent", "start", name, "--kind", kind, "--pane", pane, "--timeout", "30000")
+// AgentStart starts an agent in a pane; agentArgs go to the agent's own CLI.
+func (h Herdr) AgentStart(name, kind, pane string, agentArgs ...string) error {
+	args := []string{"agent", "start", name, "--kind", kind, "--pane", pane, "--timeout", "30000"}
+	if len(agentArgs) > 0 {
+		args = append(append(args, "--"), agentArgs...)
+	}
+	_, err := h.call(40*time.Second, args...)
 	return err
+}
+
+type Pane struct {
+	ID    string `json:"pane_id"`
+	Agent string `json:"agent"`
+}
+
+func (h Herdr) Panes(workspace string) ([]Pane, error) {
+	res, err := h.call(callTimeout, "pane", "list", "--workspace", workspace)
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Panes []Pane `json:"panes"`
+	}
+	return out.Panes, json.Unmarshal(res, &out)
 }
 
 func (h Herdr) Prompt(target, text string) error {

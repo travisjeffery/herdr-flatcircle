@@ -78,7 +78,7 @@ func TestContextTagsNonDefaultRepoAndWarnsOnUnknown(t *testing.T) {
 		threads[i].Agent = agentOn
 	}
 	ready := []Bead{{ID: "b-3", Status: StatusOpen, Labels: []string{"repo:web"}}}
-	out := renderContext(multi, threads, nil, ready, nil, TickerState{}, t0)
+	out := renderContext(multi, threads, nil, ready, nil, TickerState{}, nil, t0)
 	for _, want := range []string{
 		"- b-1 · ",
 		"- b-2 [infra] · ",

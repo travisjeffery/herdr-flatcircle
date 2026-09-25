@@ -20,7 +20,8 @@ func lastNote(notes string, n int) string {
 
 // renderContext is the coordinator's view of the world, read at the start of
 // every turn. Files and bd are the record; this is a digest of them.
-func renderContext(cfg Config, threads []Thread, next, ready []Bead, inbox []InboxItem, st TickerState, now time.Time) string {
+// worktreed holds the no-agent threads that have a worktree; nil means unknown.
+func renderContext(cfg Config, threads []Thread, next, ready []Bead, inbox []InboxItem, st TickerState, worktreed map[string]bool, now time.Time) string {
 	var s strings.Builder
 	sort.SliceStable(threads, func(i, j int) bool {
 		gi, gj := classify(threads[i]), classify(threads[j])
@@ -66,12 +67,20 @@ func renderContext(cfg Config, threads []Thread, next, ready []Bead, inbox []Inb
 	if len(threads) == 0 {
 		s.WriteString("(none)\n")
 	}
-	var orphans []string
+	var resumable, stale []string
+	untouched := -1
 	for _, t := range threads {
-		// Claimed beads nobody is on are usually stale claims; listing each
+		// Claimed beads nobody is on are summarized, resumable or stale; listing each
 		// buries the threads that are live.
 		if classify(t) == GroupNoAgent {
-			orphans = append(orphans, t.Bead.ID)
+			if worktreed[t.Bead.ID] {
+				resumable = append(resumable, t.Bead.ID)
+			} else {
+				stale = append(stale, t.Bead.ID)
+				if d := daysSince(t.Bead.UpdatedAt, now); untouched < 0 || d < untouched {
+					untouched = d
+				}
+			}
 			continue
 		}
 		agent := "no agent"
@@ -92,8 +101,14 @@ func renderContext(cfg Config, threads []Thread, next, ready []Bead, inbox []Inb
 			fmt.Fprintf(&s, "  %s\n", t.PR.URL)
 		}
 	}
-	if len(orphans) > 0 {
-		fmt.Fprintf(&s, "- claimed, no agent (%d): %s\n", len(orphans), strings.Join(orphans, ", "))
+	if len(resumable) > 0 {
+		fmt.Fprintf(&s, "- resumable (%d): %s  → shepherd resume\n", len(resumable), strings.Join(resumable, ", "))
+	}
+	switch {
+	case worktreed == nil && len(stale) > 0:
+		fmt.Fprintf(&s, "- claimed, no agent (%d): %s\n", len(stale), strings.Join(stale, ", "))
+	case len(stale) > 0:
+		fmt.Fprintf(&s, "- stale claims (%d): %s — no agent, no worktree, untouched %dd+\n", len(stale), strings.Join(stale, ", "), untouched)
 	}
 
 	if moves := linearMoves(threads); len(moves) > 0 {
@@ -202,6 +217,7 @@ answer. Beads (bd) is the only task record; there is no TASKS.md.
   parked for days), the worker labels its bead `+"`rolling-out`"+` (`+"`bd label add <id> rolling-out`"+`)
   and notes each Actions run URL; the ticker follows those runs. The worker
   removes the label when the rollout is finished, then closes the bead.
+- Offer `+"`shepherd resume <bead>...`"+` for resumable threads and `+"`shepherd stale --release`"+` for stale claims; run either only on TJ's go-ahead.
 - Lessons worth keeping across threads go to `+"`bd remember`"+`.
 - Messages starting "[shepherd ticker: automated ...]" come from the ticker, not
   TJ, and approve nothing.

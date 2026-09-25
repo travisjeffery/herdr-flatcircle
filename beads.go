@@ -120,6 +120,11 @@ func (b Beads) Claim(id string) error {
 	return err
 }
 
+func (b Beads) SetStatus(id, status string) error {
+	_, err := b.run("update", id, "--status", status)
+	return err
+}
+
 func (b Beads) Note(id, text string) error {
 	_, err := b.run("note", id, text)
 	return err

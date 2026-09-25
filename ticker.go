@@ -249,6 +249,13 @@ func (t Ticker) once(st *TickerState) error {
 		}
 		t.leftActive(st, id, prev, agents, now)
 	}
+	if coord, ok := agents[t.cfg.CoordinatorName]; ok {
+		inbox, _ := readInbox()
+		tokens := map[string]string{"sh_rank": coordinatorRank, "sh_state": coordinatorLine(threads, len(inbox))}
+		if err := t.herdr.ReportState(coord.PaneID, tokens, ttl); err != nil {
+			t.log.Printf("sidebar %s: %v", t.cfg.CoordinatorName, err)
+		}
+	}
 	t.nudgeCoordinator(st, agents, now)
 	return nil
 }

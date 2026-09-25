@@ -372,3 +372,22 @@ func TestFirstPassAfterUpgradeOnlySetsReviewBaseline(t *testing.T) {
 		t.Fatalf("a human review after the baseline should prompt and notify: %+v", o)
 	}
 }
+
+func TestCoordinatorSortsFirstAndSummarises(t *testing.T) {
+	for _, g := range []Group{GroupNeedsYou, GroupNoAgent} {
+		if r := rank(g, "backend-ab12"); !(coordinatorRank < r) {
+			t.Fatalf("coordinator rank %q must sort before thread rank %q", coordinatorRank, r)
+		}
+	}
+	threads := []Thread{
+		thread(bead(StatusNeedsMe), agent("idle", 1), nil),
+		thread(bead(StatusNeedsMe), agent("idle", 1), nil),
+		thread(bead(StatusInProgress), agent("working", 1), nil),
+	}
+	if got := coordinatorLine(threads, 3); got != "coordinator · 2 need you · 1 working · 3 inbox" {
+		t.Fatalf("got %q", got)
+	}
+	if got := coordinatorLine(nil, 0); got != "coordinator" {
+		t.Fatalf("got %q", got)
+	}
+}

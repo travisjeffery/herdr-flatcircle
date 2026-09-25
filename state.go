@@ -293,3 +293,29 @@ func transition(t Thread, prev Snapshot, first bool, now time.Time) Outcome {
 func deliverable(s Snapshot, now time.Time, idle time.Duration) bool {
 	return !s.ReadySince.IsZero() && now.Sub(s.ReadySince) >= idle
 }
+
+// coordinatorRank sorts the coordinator above every thread: thread ranks start
+// with a digit, and '!' sorts before digits.
+const coordinatorRank = "!coordinator"
+
+// coordinatorLine is the coordinator's sidebar row: what it has to deal with.
+func coordinatorLine(threads []Thread, inbox int) string {
+	counts := map[Group]int{}
+	for _, t := range threads {
+		counts[classify(t)]++
+	}
+	s := "coordinator"
+	for _, g := range []Group{GroupNeedsYou, GroupFailing, GroupReview, GroupWorking} {
+		if n := counts[g]; n > 0 {
+			label := g.String()
+			if g == GroupNeedsYou {
+				label = "need you"
+			}
+			s += fmt.Sprintf(" · %d %s", n, label)
+		}
+	}
+	if inbox > 0 {
+		s += fmt.Sprintf(" · %d inbox", inbox)
+	}
+	return s
+}

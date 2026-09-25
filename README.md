@@ -137,7 +137,8 @@ the same `shepherd context`.
 
 The board (`prefix+j`) lists threads by state plus the beads you've marked
 `next` and other ready beads: `↵` focus or start, `c`/`x` start with Claude or
-Codex, `n` toggle `next`, `y` copy the id.
+Codex, `n` toggle `next`, `y` copy the id, `p` copy a thread's pending
+`RUN:` command, `r` refresh, `q` quit.
 
 ## Requirements
 
@@ -208,53 +209,165 @@ configured repository falls back to `repo` and shows as a warning in
 
 `~/.config/shepherd/instructions.md` is added to every worker's brief.
 
+## Commands
+
+| Command | What it does |
+|---|---|
+| `shepherd coordinator [--agent K]` | Open (or focus) the coordinator agent. Also `prefix+shift+j`. |
+| `shepherd dispatch <bead> [--agent K] [--focus]` | Claim a bead, create its worktree and branch, start a worker and brief it. |
+| `shepherd focus [<bead>] [--agent K]` | Focus the bead's worker, or dispatch one. With no bead, reads the id from the clipboard. |
+| `shepherd context` | The coordinator's digest: inbox, threads by state, Linear moves, `next` and ready beads. |
+| `shepherd inbox done [<bead>...]` | Mark inbox items handled (all of them if no bead is given). |
+| `shepherd resume [<bead>...] [--agent K]` | Restart exited workers in their worktrees, continuing their last conversation. |
+| `shepherd stale [--days N] [--release]` | List claims with no agent, worktree or PR untouched N days (7); `--release` reopens them. |
+| `shepherd resolve <bead> [--force]` | Remove a finished bead's worktree, and its branch if the PR merged. |
+| `shepherd sweep [--yes]` | List finished worktrees across every repo; `--yes` removes only the safe ones. |
+| `shepherd report [--since 24h\|7d\|DATE]` | Markdown summary of what shipped, what's in flight and what needs you. |
+| `shepherd board` | The board popup (`prefix+j`). |
+| `shepherd ticker run\|start\|stop\|status`, `shepherd tick` | The background loop, or one pass of it in the foreground. |
+| `shepherd configure` / `unconfigure` | Install, or remove, the agent view and sidebar tokens. |
+
+`K` is `claude`, `codex` or `auto`.
+
 ## How it works
 
-- **Threads.** `shepherd dispatch <bead>` claims the bead, creates the worktree,
-  starts the agent and sends the brief. If the agent opens on a startup prompt
-  (folder trust), the brief waits in an outbox until you answer it.
-- **Resume.** Herdr restarts don't relaunch agents. `shepherd resume` restarts
-  each claimed bead's agent in its worktree with `claude --continue` or
-  `codex resume --last`; `shepherd stale [--release]` lists (or reopens)
-  claims with no agent or worktree untouched for `--days` (7).
+### The pieces
+
+| Piece | What it is | What it owns |
+|---|---|---|
+| **Beads** (`bd`) | The issue tracker in your repo | All task state: status, notes, questions, lessons. The only record. |
+| **Herdr** | The terminal the agents run in | Panes, agent names and states, worktrees, the sidebar, notifications |
+| **Coordinator** | One agent named `shepherd`, in `~/.local/state/shepherd/coordinator` | Talking to you, planning, creating beads, dispatching. Never does the work. |
+| **Workers** | One agent per bead, named after the bead, in the bead's worktree | Doing the work and keeping their bead current |
+| **Ticker** | A background loop (`shepherd ticker`), started with the plugin | Watching threads, following PRs and runs, prompting workers, the inbox, the sidebar |
+
+The coordinator and the ticker never talk to each other directly. The ticker
+writes events to an **inbox** (files in `~/.local/state/shepherd/inbox/`) and
+nudges the coordinator; the coordinator reads the inbox through
+`shepherd context`. Everything a worker wants to say goes into its bead.
+
+### The loop
+
+```
+  you ──── talk ────▶ coordinator ──── shepherd dispatch ────▶ worker (own worktree)
+   ▲                    ▲     │                                  │  ▲
+   │                    │     └── shepherd context ◀─┐           │  │ prompts, once idle 60s
+   │ notifications      │ nudge                      │ inbox     │  │ (checks, reviews, merge, runs)
+   │ + sidebar          │                            │           ▼  │
+   └──────────────────── ticker ─────────────────────┴──── reads bd, herdr, gh
+                         every 15s (PRs and runs every 60s)
+```
+
+1. **You ask the coordinator for something.** It runs `shepherd context`,
+   creates beads for the work (`bd create`, with parents and dependencies), and
+   proposes threads. It waits for your go-ahead.
+2. **The coordinator dispatches.** `shepherd dispatch <bead>` claims the bead,
+   creates a worktree on `<branch_prefix><bead>-<slug>`, starts Claude or Codex
+   named after the bead, and sends the **brief**: the bead id and title, the
+   worktree and branch, the Linear key if there is one, how to report, and
+   your `instructions.md`. If the agent opens on a startup prompt (folder
+   trust), the brief goes to the **outbox** and you're notified; the ticker
+   delivers it once the agent is ready.
+3. **The worker works and writes to its bead.** Findings and decisions go in
+   `bd note`. It notes `PR: <url>` when it opens a PR and any Actions run URL
+   it's waiting on. When it needs a decision, it writes the question and sets
+   the bead to `needs_me`. When it needs you to run a command, it writes
+   `RUN: <command>` and sets `needs_me`. After a merge with steps left, it adds
+   the `rolling-out` label.
+4. **The ticker watches.** Every 15 seconds it reads the active beads
+   (`in_progress`, `needs_me`, `blocked`) and Herdr's agents, and joins them by
+   name. Every 60 seconds it also asks GitHub about each bead's PR (found by
+   branch, or by a PR link in the notes) and any Actions runs linked in the
+   notes. It compares each thread with what it saw last time.
+5. **The ticker acts on what changed:**
+   - **The sidebar:** each worker's row gets its state line, like
+     `review · PR #411 approved · ENG-1024`, and the agent view sorts what
+     needs you to the top.
+   - **The worker:** failing checks, new review feedback, a merge or a finished
+     run become a prompt to that worker. Prompts wait until the worker has
+     been idle for `idle_seconds`, so they never land in the middle of
+     something, and several are sent together.
+   - **The inbox:** each change is also an event file for the coordinator.
+   - **You:** entering needs-you, a merge, a failed run or a human review
+     notifies you.
+   - **The coordinator:** when there are new events and the coordinator has
+     been idle for `idle_seconds`, the ticker nudges it to run
+     `shepherd context`.
+6. **The coordinator catches up.** It reads the inbox and threads, relays
+   questions and `RUN:` commands to you, passes your answers to the worker
+   (`herdr agent prompt`), and marks the items handled with
+   `shepherd inbox done`.
+7. **The thread finishes.** After the merge the worker verifies and closes its
+   bead with a reason. The ticker sees it leave the active set and writes a
+   `closed` event, and the coordinator runs `shepherd resolve` to remove the
+   worktree.
+
+### Messages
+
+Every automated message says it isn't from you, and none approves anything.
+
+| From → to | When | Starts with |
+|---|---|---|
+| dispatch → worker | Once, at start | `You are the shepherd worker for bead …` |
+| ticker → worker | Checks fail, review feedback, merge, run finished | `[shepherd: automated, not the user] PR #N …` |
+| resume → worker | After `shepherd resume` | `[shepherd] You were resumed after your agent exited.` |
+| ticker → coordinator | New inbox items and the coordinator is idle | `[shepherd ticker: automated, not the user, approves nothing] N new inbox item(s).` |
+| worker → everyone | Any time | A note on its bead (`bd note`), or a status change |
+| coordinator → worker | Relaying your answer | Whatever it writes with `herdr agent prompt` |
+
+Inbox event kinds: `needs_you`, `checks_failing`, `new_review`, `merged`,
+`run_succeeded`, `run_failed`, `finished` (a worker finished a turn),
+`agent_gone` (its agent exited) and `closed`.
+
+### Features in detail
+
+- **Needs you.** A thread needs you when its bead is `needs_me` (the question
+  is its latest note) or its agent is stopped at a permission or question
+  prompt.
+- **Commands only you can run** (a classifier denial, an interactive login, a
+  production change) come back as a `RUN: <command>` note on a `needs_me`
+  bead. The sidebar shows `needs you · run command`, the coordinator relays it
+  ready to paste after `!`, and `p` in the board copies it. When you've run it
+  the worker notes `RAN: <command> → <result>`. A `RUN:` only counts while it's
+  one of the bead's last two notes, so an answered command is never offered
+  again.
 - **PRs** are found by branch name or by a PR link in the bead's notes, so a
   bead worked on a differently named branch is still followed.
-- **Actions runs** linked in a bead's notes (the latest three) are followed
-  too: the worker is told when one succeeds and to continue the rollout, and
-  when one fails, you're notified and the worker is told to investigate. A
-  running workflow shows on the thread's state line.
-- **`rolling-out`** is the label a worker puts on its bead when steps remain
-  after its PR merges. The thread then sits in **rolling out** instead of
-  **merged**, and the merge prompt says to carry on rather than close.
+- **Actions runs** linked in a bead's notes (the latest three) are followed.
+  The worker is told when one succeeds and to continue, and when one fails
+  you're notified and the worker is told to investigate. A running workflow
+  shows on the thread's state line.
+- **`rolling-out`.** A worker adds this label when steps remain after its PR
+  merges. The thread then shows **rolling out** instead of **merged**, and the
+  merge prompt says to carry on rather than close.
 - **Bot reviews** (Codex, CodeRabbit and other GitHub Apps) are told apart from
-  human ones: both go to the worker, but only a human review notifies you.
-- **The ticker** only types into an agent that has been idle for
-  `idle_seconds`: on Herdr 0.9.1 a prompt merges with whatever you've
-  half-typed.
-- **The sidebar sort** is a Herdr agent view owned by `plugin:shepherd`. Herdr
-  drops it when the plugin is unlinked, uninstalled or disabled;
-  `shepherd unconfigure` stops the ticker and removes the view and sidebar
-  tokens by hand.
-- **Linear.** The first issue key (`ENG-1102`) in a bead's title, else its
-  notes, goes in the worker's brief and at the end of its sidebar row
-  (`review · PR #7 · ENG-1102`). `shepherd context` lists where each issue
-  should be (In Review while its PR is open, Done once merged) and flags PR
-  titles missing the key; the coordinator makes the moves or lists them for
-  you.
-- **Commands only you can run** (a classifier denial, an interactive login, a
-  production change) come back as a `RUN: <command>` note on a needs_me bead:
-  the sidebar shows `needs you · run command`, the coordinator relays it ready
-  to paste after `!`, and `p` in the board copies it.
-- **Sweep.** `shepherd sweep` lists linked worktrees whose PR merged, whose
-  bead is closed, or that git reports prunable, across every repo; `--yes`
-  removes only the ones that are clean, fully pushed and have no agent in them,
-  and deletes a local branch only when its PR merged.
-- **The coordinator** reads `shepherd context` each turn: an inbox of events,
-  every active thread and the beads ready to start.
-- **Reporting.** `shepherd report [--since 24h|7d|YYYY-MM-DD]` prints Markdown
-  for a daily or weekly update: beads closed in the window with their close
-  reasons and PRs, your PRs merged without a bead, open PRs in flight, and
-  needs_me beads with their latest note.
+  human ones. Both go to the worker; only a human review notifies you.
+- **Resume.** Herdr restarts don't relaunch agents. `shepherd resume` restarts
+  each claimed bead's agent in its worktree with `claude --continue` or
+  `codex resume --last`, as whichever agent claimed it. `shepherd context`
+  lists resumable threads, stale claims (in progress, no agent, worktree or
+  PR, untouched 7 days) and other claims separately.
+- **Several repos.** Beads labelled `repo:<name>` work in that repo from
+  `repos`; everything else uses `repo`. Dispatch refuses a name that isn't
+  configured.
+- **Linear.** The bead's issue key comes from its title, or from a `Linear:`
+  note (any note, if `linear_prefixes` is set). It goes in the brief and at
+  the end of the sidebar row. `shepherd context` lists where each issue should
+  be (In Review while its PR is open, Done once merged) and flags PR titles
+  missing the key.
+- **Choosing the agent.** `worker_agent = "auto"` picks Codex only when both
+  agents' usage readings are under 6 hours old and Codex has more left;
+  otherwise Claude.
+- **Sweep** lists linked worktrees whose PR merged, whose bead is closed, or
+  that git reports prunable. `--yes` removes only the ones that are clean,
+  fully pushed, have no agent in them and whose bead isn't still active. It
+  deletes a local branch only when its PR merged.
+- **Reporting.** `shepherd report` prints beads closed in the window with
+  their close reasons and PRs, your PRs merged without a bead, open PRs in
+  flight, and `needs_me` beads with their latest note.
+- **The sidebar sort** is a Herdr agent view owned by `plugin:shepherd`.
+  Herdr drops it when the plugin is unlinked, uninstalled or disabled.
 
-State lives in `~/.local/state/shepherd/` (`state.json`, `inbox/`, `outbox/`,
-`ticker.log`).
+State lives in `~/.local/state/shepherd/`: `state.json` (the ticker's memory
+of each thread), `inbox/` and `inbox/done/` (events), `outbox/` (briefs
+waiting for an agent), `coordinator/` (its folder) and `ticker.log`.

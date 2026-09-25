@@ -24,6 +24,8 @@ Usage:
   shepherd board                                the board (runs as the plugin popup)
   shepherd ticker run|start|stop|status         the background loop: sidebar, PR follow-up, nudges
   shepherd tick                                 one ticker pass in the foreground
+  shepherd configure                            install shepherd's agent view (sort by thread state)
+  shepherd unconfigure                          stop the ticker, remove the view and sidebar tokens
   shepherd version
 `
 
@@ -170,8 +172,25 @@ func run(args []string) error {
 		}
 		return saveState(st)
 	case "startup":
-		// Herdr runs this when the plugin loads; only start the ticker.
+		// Herdr runs this when the plugin loads. Views don't survive a server
+		// restart, so the view is set again here.
+		if err := setView(socketRPC{herdrSocket()}); err != nil {
+			fmt.Fprintln(os.Stderr, "shepherd: agent view:", err)
+		}
 		return tickerStart()
+	case "configure":
+		if err := setView(socketRPC{herdrSocket()}); err != nil {
+			return err
+		}
+		fmt.Println("agent view set: label \"shepherd\", sorted by thread state")
+	case "unconfigure":
+		if err := tickerStop(); err != nil {
+			return err
+		}
+		if err := unconfigure(socketRPC{herdrSocket()}, h.Agents, h.ClearState); err != nil {
+			return err
+		}
+		fmt.Println("agent view and sidebar tokens removed")
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", cmd, strings.TrimSpace(usage))
 	}

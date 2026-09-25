@@ -20,6 +20,12 @@ and the herdr-beads board.
   - nudges the coordinator when there are new events;
   - only types into an agent that has sat idle for `idle_seconds`, because on
     Herdr 0.9.1 a prompt merges with half-typed input.
+- **Agent view.** The agents list is labelled `shepherd` and sorted by thread
+  state (needs you first), then attention and recency. Agents that aren't on a
+  bead follow the threads; nothing is hidden. The view is owned by
+  `plugin:shepherd`, so herdr drops it when the plugin is unlinked, uninstalled
+  or disabled. `shepherd configure` sets it (plugin startup does too);
+  `shepherd unconfigure` stops the ticker and removes the view and tokens.
 - **Board.** A popup listing threads by state, the `next` beads and ready beads:
   `↵` focus or start, `c`/`x` start with Claude/Codex, `n` toggle `next`,
   `y` copy the id.

@@ -1,0 +1,132 @@
+package main
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"net"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+// A "plugin:<id>" source makes the view plugin-owned: herdr clears it itself
+// when the plugin is unlinked, uninstalled or disabled, so it cannot outlive
+// shepherd the way herdr-projects' plain-source view did.
+const (
+	viewSource = "plugin:shepherd"
+	viewLabel  = "shepherd"
+	// legacyViewSource is cleared too, in case a view was set under it by hand.
+	legacyViewSource = "shepherd"
+)
+
+// rpc is herdr's socket API: one JSON request per line, one response per line.
+// Views have no CLI subcommand.
+type rpc interface {
+	Call(method string, params any) (json.RawMessage, error)
+}
+
+type socketRPC struct{ path string }
+
+func herdrSocket() string {
+	if p := os.Getenv("HERDR_SOCKET_PATH"); p != "" {
+		return p
+	}
+	d, _ := os.UserConfigDir()
+	return filepath.Join(d, "herdr", "herdr.sock")
+}
+
+func (s socketRPC) Call(method string, params any) (json.RawMessage, error) {
+	conn, err := net.DialTimeout("unix", s.path, 5*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+	req, err := json.Marshal(map[string]any{"id": "shepherd", "method": method, "params": params})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := conn.Write(append(req, '\n')); err != nil {
+		return nil, err
+	}
+	line, err := bufio.NewReader(conn).ReadBytes('\n')
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Result json.RawMessage `json:"result"`
+		Error  *struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(line, &resp); err != nil {
+		return nil, err
+	}
+	if resp.Error != nil {
+		return nil, fmt.Errorf("herdr %s: %s: %s", method, resp.Error.Code, resp.Error.Message)
+	}
+	return resp.Result, nil
+}
+
+type viewSort struct {
+	Field any    `json:"field"`
+	Order string `json:"order"`
+}
+
+type viewSpec struct {
+	Source string     `json:"source"`
+	Label  string     `json:"label"`
+	Sort   []viewSort `json:"sort"`
+}
+
+// shepherdView sorts threads by the ticker's sh_rank token ("<group>-<bead>",
+// needs you first). Herdr orders an agent without the token after every agent
+// with it, so non-thread agents follow the threads and nothing is hidden. A
+// view's sort replaces agent_panel_sort, so attention and recency come back as
+// tie-breakers.
+func shepherdView() viewSpec {
+	return viewSpec{
+		Source: viewSource,
+		Label:  viewLabel,
+		Sort: []viewSort{
+			{Field: map[string]string{"token": "sh_rank"}, Order: "asc"},
+			{Field: "attention", Order: "desc"},
+			{Field: "state_change_seq", Order: "desc"},
+		},
+	}
+}
+
+// setView installs shepherd's view. Herdr holds a single view and a set
+// replaces it, so calling this on every startup or configure is idempotent.
+func setView(c rpc) error {
+	_, err := c.Call("agent.view.set", shepherdView())
+	return err
+}
+
+// clearView removes shepherd's view and leaves any other source's view alone.
+func clearView(c rpc) error {
+	for _, source := range []string{viewSource, legacyViewSource} {
+		if _, err := c.Call("agent.view.clear", map[string]string{"source": source}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// unconfigure removes everything shepherd put into herdr: its view and the
+// sidebar tokens on every agent pane.
+func unconfigure(c rpc, agents func() ([]Agent, error), clearTokens func(pane string)) error {
+	if err := clearView(c); err != nil {
+		return err
+	}
+	list, err := agents()
+	if err != nil {
+		return err
+	}
+	for _, a := range list {
+		clearTokens(a.PaneID)
+	}
+	return nil
+}

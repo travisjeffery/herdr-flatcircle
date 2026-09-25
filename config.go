@@ -3,8 +3,10 @@ package main
 import (
 	"errors"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -28,6 +30,10 @@ type Config struct {
 	// Remove a bead's worktree once its PR merged, the bead is closed and its
 	// agent is idle. Off by default: removal closes the workspace.
 	AutoResolve bool `toml:"auto_resolve"`
+
+	// Repos are named repositories a bead selects with a repo:<name> label;
+	// Repo is the default.
+	Repos map[string]string `toml:"repos"`
 }
 
 func defaultConfig() Config {
@@ -67,6 +73,9 @@ func loadConfig() (Config, error) {
 		return cfg, err
 	}
 	cfg.Repo, cfg.BeadsDir = expandHome(cfg.Repo), expandHome(cfg.BeadsDir)
+	for name, path := range cfg.Repos {
+		cfg.Repos[name] = expandHome(path)
+	}
 	if cfg.Repo == "" {
 		return cfg, errors.New("set repo in " + filepath.Join(configDir(), "config.toml"))
 	}
@@ -89,16 +98,39 @@ func expandHome(p string) string {
 	return p
 }
 
+const repoLabel = "repo:"
+
+// repoName is the name a bead's repo: label selects, "" for the default repo,
+// and whether that name is configured.
+func (c Config) repoName(b Bead) (string, bool) {
+	for _, l := range b.Labels {
+		if name, ok := strings.CutPrefix(l, repoLabel); ok {
+			_, known := c.Repos[name]
+			return name, known
+		}
+	}
+	return "", true
+}
+
 // repoFor is the repository a bead's worktree, branch and PRs live in. Every
 // per-bead repo lookup goes through here so multi-repo support has one seam.
 func (c Config) repoFor(b Bead) string {
+	if name, ok := c.repoName(b); ok && name != "" {
+		return c.Repos[name]
+	}
 	return c.Repo
 }
 
 // allRepos is every repository shepherd follows, for passes that are not about
 // one bead (PR listing, worktree sweeps).
 func (c Config) allRepos() []string {
-	return []string{c.Repo}
+	repos := []string{filepath.Clean(c.Repo)}
+	for _, name := range slices.Sorted(maps.Keys(c.Repos)) {
+		if p := filepath.Clean(c.Repos[name]); !slices.Contains(repos, p) {
+			repos = append(repos, p)
+		}
+	}
+	return repos
 }
 
 func (c Config) tick() time.Duration { return time.Duration(max(c.TickSeconds, 5)) * time.Second }

@@ -121,7 +121,7 @@ func run(args []string) error {
 		next, _ := Beads{}.Next()
 		ready, _ := Beads{}.Ready()
 		inbox, _ := readInbox()
-		fmt.Print(renderContext(threads, next, ready, inbox, st, time.Now()))
+		fmt.Print(renderContext(cfg, threads, next, ready, inbox, st, time.Now()))
 	case "inbox":
 		if len(pos) == 0 || pos[0] != "done" {
 			return fmt.Errorf("usage: shepherd inbox done [<bead>...]")

@@ -194,7 +194,15 @@ gh_seconds = 60           # how often it checks PRs
 idle_seconds = 60         # it only types into an agent idle this long
 nudge = true              # prompt the coordinator when there's news
 auto_resolve = false      # remove a merged, closed bead's worktree automatically
+repos = { infra = "~/src/infra", model = "~/src/model" }
 ```
+
+`repo` is the default repository. A bead whose work is in another one carries
+the label `repo:<name>` for a name in `repos` (`bd label add <bead> repo:infra`);
+its worktree, branch and PRs then live in that repository, and
+`shepherd context` tags its thread `[infra]`. A `repo:` label naming no
+configured repository falls back to `repo` and shows as a warning in
+`shepherd context`.
 
 `~/.config/shepherd/instructions.md` is added to every worker's brief.
 

@@ -136,13 +136,15 @@ func pickResumable(res []Resumable, ids []string) ([]Resumable, []string) {
 // (dispatch claims as the agent kind), then the configured worker.
 func resumeKind(cfg Config, b Bead, kind string) string {
 	switch {
-	case kind != "":
-		return kind
-	case validKinds[b.Assignee]:
+	case kind == "" && validKinds[b.Assignee]:
 		return b.Assignee
-	default:
-		return cfg.WorkerAgent
+	case kind == "":
+		kind = cfg.WorkerAgent
 	}
+	if kind == "auto" {
+		return autoAgent(time.Now())
+	}
+	return kind
 }
 
 func freePane(panes []Pane) (string, bool) {

@@ -27,6 +27,7 @@ type sweepCandidate struct {
 	Unpushed    int
 	Agent       string
 	CheckErr    string
+	ActiveBead  string
 }
 
 // sweepEnv is everything sweep reads or changes, so the decision and the
@@ -35,6 +36,8 @@ type sweepEnv struct {
 	worktrees       func(repo string) ([]Worktree, error)
 	mergedHeads     func(repo string) (map[string]bool, error)
 	closedBeads     func() ([]Bead, error)
+	activeBeads     func() ([]Bead, error)
+	prHeads         func() map[string]string
 	agents          func() ([]Agent, error)
 	exists          func(path string) bool
 	git             func(dir string, args ...string) (string, error)
@@ -46,7 +49,15 @@ func liveSweepEnv(h Herdr) sweepEnv {
 		worktrees:   h.Worktrees,
 		mergedHeads: func(repo string) (map[string]bool, error) { return GH{repo: repo}.MergedHeads() },
 		closedBeads: func() ([]Bead, error) { return Beads{}.list("--status", StatusClosed) },
-		agents:      h.Agents,
+		activeBeads: Beads{}.Active,
+		prHeads: func() map[string]string {
+			heads := map[string]string{}
+			for id, pr := range loadState().PRs {
+				heads[pr.Head] = id
+			}
+			return heads
+		},
+		agents: h.Agents,
 		exists: func(path string) bool {
 			_, err := os.Stat(path)
 			return err == nil
@@ -179,6 +190,9 @@ func keepReason(c sweepCandidate) string {
 	if c.Agent != "" {
 		why = append(why, "agent "+c.Agent+" in it")
 	}
+	if c.ActiveBead != "" {
+		why = append(why, "bead "+c.ActiveBead+" still active")
+	}
 	return strings.Join(why, ", ")
 }
 
@@ -219,6 +233,16 @@ func sweep(cfg Config, env sweepEnv, yes bool, w io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// A merged, clean worktree can still belong to live work (a rollout parked
+	// on a deploy, an agent that exited): never sweep an active bead's worktree.
+	active, err := env.activeBeads()
+	if err != nil {
+		return err
+	}
+	var heads map[string]string
+	if env.prHeads != nil {
+		heads = env.prHeads()
+	}
 	var cands []sweepCandidate
 	for _, repo := range cfg.allRepos() {
 		wts, err := env.worktrees(repo)
@@ -233,6 +257,7 @@ func sweep(cfg Config, env sweepEnv, yes bool, w io.Writer) error {
 	}
 	for i := range cands {
 		inspectSweep(&cands[i], env, agents)
+		cands[i].ActiveBead = activeBeadFor(cfg.BranchPrefix, cands[i].Branch, active, heads)
 	}
 	if len(cands) == 0 {
 		fmt.Fprintln(w, "nothing to sweep")
@@ -294,4 +319,20 @@ func yesNo(b bool) string {
 		return "yes"
 	}
 	return "no"
+}
+
+// activeBeadFor names the active bead a branch belongs to: by shepherd's
+// branch naming or by the PR head the ticker recorded for it.
+func activeBeadFor(prefix, branch string, active []Bead, heads map[string]string) string {
+	if b, ok := beadForBranch(prefix, branch, active); ok {
+		return b.ID
+	}
+	if id, ok := heads[branch]; ok && branch != "" {
+		for _, b := range active {
+			if b.ID == id {
+				return id
+			}
+		}
+	}
+	return ""
 }

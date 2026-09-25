@@ -174,9 +174,13 @@ func (t Ticker) refreshPRs(st *TickerState, active []Bead) {
 				pr = full
 			} else {
 				t.log.Printf("gh pr view %d: %v", pr.Number, err)
-				if old, ok := st.PRs[b.ID]; ok && old.Number == pr.Number {
-					pr = old
+				old, ok := st.PRs[b.ID]
+				if !ok || old.Number != pr.Number {
+					// The list entry has no reviews or checks; recording it would make
+					// the next good pass see every existing review as new.
+					continue
 				}
+				pr = old
 			}
 		}
 		prs[b.ID] = pr

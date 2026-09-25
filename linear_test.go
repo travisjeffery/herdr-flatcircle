@@ -14,10 +14,11 @@ func TestLinearKey(t *testing.T) {
 		want     string
 	}{
 		{"title beats notes", Bead{Title: "ENG-1102: root the hosts", Notes: "Linear ENG-900"}, nil, "ENG-1102"},
-		{"notes when the title has none", Bead{Title: "Root the hosts", Notes: "see OPS-3\nthen ENG-900"}, nil, "OPS-3"},
+		{"a Linear: note when the title has none", Bead{Title: "Root the hosts", Notes: "blocked by ENG-900\nLinear: OPS-3"}, nil, "OPS-3"},
+		{"passing mentions in notes are not the bead's issue", Bead{Title: "Root the hosts", Notes: "blocked by ENG-900"}, nil, ""},
 		{"prefixes skip other teams", Bead{Title: "OPS-3 follow-up", Notes: "Linear ENG-900"}, []string{"ENG"}, "ENG-900"},
 		{"prefixes reject everything else", Bead{Title: "P0-1 outage"}, []string{"ENG"}, ""},
-		{"denylist without prefixes", Bead{Title: "Pin SHA-256 and UTF-8 handling", Notes: "RFC-9110 then WEB-12"}, nil, "WEB-12"},
+		{"denylist without prefixes", Bead{Title: "Pin SHA-256 and UTF-8 handling", Notes: "Linear: RFC-9110 then WEB-12"}, nil, "WEB-12"},
 		{"parts of longer tokens", Bead{Title: "us-west US-EAST-2 RSA-OAEP-256 [a-zA-Z0-9] GLM-5.3", Notes: "tj/eng-1102-fix"}, nil, ""},
 		{"none", Bead{Title: "Fix the thing"}, nil, ""},
 	}

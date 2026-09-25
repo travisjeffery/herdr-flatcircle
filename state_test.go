@@ -96,7 +96,7 @@ func TestNewReviewPromptsOnlyOnSamePR(t *testing.T) {
 	if o := transition(th, Snapshot{PRNumber: 0, Reviews: 0}, false, t0); len(o.Prompts) != 0 {
 		t.Fatalf("reviews on a newly found PR are not new: %+v", o.Prompts)
 	}
-	if o := transition(th, Snapshot{PRNumber: 7, PRState: "OPEN", Reviews: 1}, false, t0); len(o.Prompts) != 1 {
+	if o := transition(th, Snapshot{PRNumber: 7, PRState: "OPEN", Reviews: 1, ReviewsSplit: true}, false, t0); len(o.Prompts) != 1 {
 		t.Fatalf("want a review prompt, got %+v", o.Prompts)
 	}
 }
@@ -322,7 +322,7 @@ func TestRollingOutAfterMerge(t *testing.T) {
 }
 
 func TestBotAndHumanReviews(t *testing.T) {
-	prev := Snapshot{PRNumber: 7, PRState: "OPEN", Reviews: 1, BotReviews: 1}
+	prev := Snapshot{PRNumber: 7, PRState: "OPEN", Reviews: 1, BotReviews: 1, ReviewsSplit: true}
 	bot := thread(bead(StatusInProgress), agent("idle", 1), openPR())
 	bot.Reviews, bot.BotReviews = 1, []string{"chatgpt-codex-connector", "coderabbitai"}
 	o := transition(bot, prev, false, t0)
@@ -354,5 +354,21 @@ func TestBotReviewsSplitFromHumans(t *testing.T) {
 	}
 	if got := botReviews(reviews); !slices.Equal(got, []string{"chatgpt-codex-connector", "renovate[bot]"}) {
 		t.Errorf("bot reviews: got %v", got)
+	}
+}
+
+func TestFirstPassAfterUpgradeOnlySetsReviewBaseline(t *testing.T) {
+	// Before bots were told apart, 2 humans + 1 bot were saved as Reviews=3.
+	// Now there are 3 humans and 1 bot: nothing is attributed on this pass.
+	th := thread(bead(StatusInProgress), agent("idle", 1), openPR())
+	th.Reviews, th.BotReviews = 3, []string{"codex-connector"}
+	legacy := Snapshot{PRNumber: 7, PRState: "OPEN", Reviews: 3}
+	if o := transition(th, legacy, false, t0); len(o.Prompts) != 0 || o.Notify {
+		t.Fatalf("a legacy snapshot produced review prompts: %+v", o)
+	}
+	next := snapshot(th, legacy, t0)
+	th.Reviews = 4
+	if o := transition(th, next, false, t0); len(o.Prompts) != 1 || !o.Notify {
+		t.Fatalf("a human review after the baseline should prompt and notify: %+v", o)
 	}
 }

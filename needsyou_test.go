@@ -68,3 +68,13 @@ func TestBriefAsksForRunNotes(t *testing.T) {
 		t.Fatalf("brief lacks the RUN rule:\n%s", s)
 	}
 }
+
+func TestAnsweredRunCommandIsNotOfferedAgain(t *testing.T) {
+	notes := "RUN: terraform apply -auto-approve\nneeds the SSO-only production role\nprovision applied, verified alerts load\nQuestion: roll to all regions or one first?"
+	if got := pendingCommand(notes); got != "" {
+		t.Fatalf("an old RUN: resurfaced after the thread moved on: %q", got)
+	}
+	if got := pendingCommand("earlier note\nRUN: gh auth login\nneeds an interactive browser login"); got != "gh auth login" {
+		t.Fatalf("RUN: plus its why should be pending, got %q", got)
+	}
+}

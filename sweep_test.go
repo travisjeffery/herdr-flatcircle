@@ -73,6 +73,8 @@ func TestKeepReasonGatesUnsafeCandidates(t *testing.T) {
 }
 
 type fakeSweep struct {
+	active   []Bead
+	heads    map[string]string
 	status   map[string]string
 	unpushed map[string]string
 	missing  map[string]bool
@@ -84,6 +86,8 @@ func (f *fakeSweep) env(wts []Worktree, merged map[string]bool, closed []Bead, a
 		worktrees:   func(string) ([]Worktree, error) { return wts, nil },
 		mergedHeads: func(string) (map[string]bool, error) { return merged, nil },
 		closedBeads: func() ([]Bead, error) { return closed, nil },
+		activeBeads: func() ([]Bead, error) { return f.active, nil },
+		prHeads:     func() map[string]string { return f.heads },
 		agents:      func() ([]Agent, error) { return agents, nil },
 		exists:      func(p string) bool { return !f.missing[p] },
 		git: func(dir string, args ...string) (string, error) {
@@ -178,5 +182,31 @@ func TestSweepAbortsWhenAgentsCannotBeListed(t *testing.T) {
 	}
 	if len(f.calls) != 0 {
 		t.Fatalf("removed without an agent list: %v", f.calls)
+	}
+}
+
+func TestSweepKeepsActiveBeadsWorktrees(t *testing.T) {
+	f := newFakeSweep()
+	// tj/a matches by PR head (a differently named branch); tj/backend-r1-… by
+	// shepherd's naming. Both are merged and clean but their beads are live.
+	f.active = []Bead{{ID: "backend-r1", Title: "Rollout", Status: StatusInProgress}, {ID: "backend-x9", Status: StatusInProgress}}
+	f.heads = map[string]string{"tj/a": "backend-x9"}
+	wts := []Worktree{
+		{Branch: "main", Path: sweepRepo},
+		{Branch: "tj/a", Path: "/wt/rollout-by-pr", Linked: true},
+		{Branch: "tj/backend-r1-rollout", Path: "/wt/rollout-by-name", Linked: true},
+	}
+	merged := map[string]bool{"tj/a": true, "tj/backend-r1-rollout": true}
+	var out strings.Builder
+	if err := sweep(Config{Repo: sweepRepo, BranchPrefix: "tj/"}, f.env(wts, merged, nil, nil), true, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.calls) != 0 {
+		t.Fatalf("removed an active bead's worktree: %v", f.calls)
+	}
+	for _, kept := range []string{"kept /wt/rollout-by-pr: bead backend-x9 still active", "kept /wt/rollout-by-name: bead backend-r1 still active"} {
+		if !strings.Contains(out.String(), kept) {
+			t.Errorf("output lacks %q:\n%s", kept, out.String())
+		}
 	}
 }

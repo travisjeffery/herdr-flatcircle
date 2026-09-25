@@ -15,7 +15,13 @@ var notLinear = []string{"SHA", "UTF", "ISO", "RFC", "HTTP", "TLS"}
 // the first in its notes. With prefixes set only those teams count; without,
 // a denylist keeps the commonest look-alikes out.
 func linearKey(b Bead, prefixes []string) string {
-	for _, text := range []string{b.Title, b.Notes} {
+	// Notes mention other issues in passing ("blocked by ENG-900"); without a
+	// prefix filter, only a note that names the bead's issue counts.
+	notes := b.Notes
+	if len(prefixes) == 0 {
+		notes = linearNoteLines(b.Notes)
+	}
+	for _, text := range []string{b.Title, notes} {
 		for _, m := range linearToken.FindAllStringIndex(text, -1) {
 			key := text[m[0]:m[1]]
 			if !standalone(text, m[0], m[1]) {
@@ -74,4 +80,14 @@ func linearMoves(threads []Thread) []string {
 		}
 	}
 	return out
+}
+
+func linearNoteLines(notes string) string {
+	var out []string
+	for _, l := range strings.Split(notes, "\n") {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(l)), "linear:") {
+			out = append(out, l)
+		}
+	}
+	return strings.Join(out, "\n")
 }

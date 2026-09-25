@@ -164,6 +164,7 @@ rows = [["state_icon", "machine", "workspace", "tab"], ["agent"],
         [{ token = "$sh_state", rules = [{ starts_with = "needs you", fg = "#f38ba8", bold = true },
                                           { starts_with = "checks failing", fg = "#f38ba8" },
                                           { starts_with = "review", fg = "#f9e2af" },
+                                          { starts_with = "rolling out", fg = "#f9e2af" },
                                           { starts_with = "merged", fg = "#a6e3a1" }] }]]
 
 [[keys.command]]

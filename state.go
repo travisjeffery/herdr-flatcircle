@@ -82,9 +82,17 @@ func classify(t Thread) Group {
 // pendingCommand is the command a worker asked the user to run, from its
 // latest "RUN:" note, until a later "RAN:" or "DONE:" note answers it.
 func pendingCommand(notes string) string {
-	lines := strings.Split(notes, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		l := strings.TrimSpace(lines[i])
+	var lines []string
+	for _, l := range strings.Split(notes, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			lines = append(lines, l)
+		}
+	}
+	// A RUN: is only live while it is one of the last two notes (the command
+	// and its one line of why). Anything later means the thread moved on, so
+	// an answered command is never offered again even without a RAN: line.
+	for i := len(lines) - 1; i >= 0 && i >= len(lines)-2; i-- {
+		l := lines[i]
 		if strings.HasPrefix(l, "RAN:") || strings.HasPrefix(l, "DONE:") {
 			return ""
 		}
@@ -136,17 +144,19 @@ func stateLine(t Thread) string {
 
 // Snapshot is what the ticker remembers about a bead between ticks.
 type Snapshot struct {
-	Group       Group             `json:"group"`
-	AgentStatus string            `json:"agent_status"`
-	AgentSeq    int64             `json:"agent_seq"`
-	ReadySince  time.Time         `json:"ready_since"`
-	PRNumber    int               `json:"pr_number"`
-	PRState     string            `json:"pr_state"`
-	Failing     []string          `json:"failing"`
-	Reviews     int               `json:"reviews"`
-	BotReviews  int               `json:"bot_reviews"`
-	Runs        map[string]string `json:"runs,omitempty"`
-	Pending     []string          `json:"pending_prompts"`
+	Group       Group     `json:"group"`
+	AgentStatus string    `json:"agent_status"`
+	AgentSeq    int64     `json:"agent_seq"`
+	ReadySince  time.Time `json:"ready_since"`
+	PRNumber    int       `json:"pr_number"`
+	PRState     string    `json:"pr_state"`
+	Failing     []string  `json:"failing"`
+	Reviews     int       `json:"reviews"`
+	BotReviews  int       `json:"bot_reviews"`
+	// ReviewsSplit marks a snapshot that counted bot and human reviews apart.
+	ReviewsSplit bool              `json:"reviews_split"`
+	Runs         map[string]string `json:"runs,omitempty"`
+	Pending      []string          `json:"pending_prompts"`
 }
 
 type EventKind string
@@ -178,7 +188,7 @@ type Outcome struct {
 }
 
 func snapshot(t Thread, prev Snapshot, now time.Time) Snapshot {
-	s := Snapshot{Group: classify(t), Reviews: t.Reviews, BotReviews: len(t.BotReviews), Runs: runStates(t.Runs), Failing: t.Checks.Failing, Pending: prev.Pending}
+	s := Snapshot{Group: classify(t), Reviews: t.Reviews, BotReviews: len(t.BotReviews), ReviewsSplit: true, Runs: runStates(t.Runs), Failing: t.Checks.Failing, Pending: prev.Pending}
 	if t.Agent != nil {
 		s.AgentStatus, s.AgentSeq = t.Agent.Status, t.Agent.Seq
 		switch {
@@ -228,14 +238,14 @@ func transition(t Thread, prev Snapshot, first bool, now time.Time) Outcome {
 				"[shepherd: automated, not the user] PR #%d has %s. Read it with `gh pr view %d --comments` and the review threads; fix what is valid, reply to what is not, and push.",
 				t.PR.Number, what, t.PR.Number))
 		}
-		samePR := prev.PRNumber == t.PR.Number
-		if t.Reviews > prev.Reviews && samePR {
+		// Snapshots from before bots were told apart counted them as human
+		// reviews; the first pass after upgrading only sets the baseline.
+		comparable := prev.PRNumber == t.PR.Number && prev.ReviewsSplit
+		if t.Reviews > prev.Reviews && comparable {
 			o.Notify = true
 			review("new human review feedback")
 		}
-		// Snapshots from before bots were told apart counted them as human
-		// reviews; an unchanged total is not a new bot review.
-		if len(t.BotReviews) > prev.BotReviews && t.Reviews+len(t.BotReviews) > prev.Reviews+prev.BotReviews && samePR {
+		if len(t.BotReviews) > prev.BotReviews && comparable {
 			review("a new review from " + strings.Join(slices.Compact(slices.Sorted(slices.Values(t.BotReviews[prev.BotReviews:]))), ", "))
 		}
 	}

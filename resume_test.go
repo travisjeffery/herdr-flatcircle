@@ -156,3 +156,15 @@ func TestContextSplitsNoAgentThreads(t *testing.T) {
 		t.Errorf("unknown worktrees should not call anything stale:\n%s", out)
 	}
 }
+
+func TestResumeKindResolvesAuto(t *testing.T) {
+	cfg := Config{WorkerAgent: "auto"}
+	for _, k := range []string{resumeKind(cfg, Bead{Assignee: "tj@example.com"}, ""), resumeKind(cfg, Bead{}, "auto")} {
+		if !validKinds[k] {
+			t.Fatalf("auto must resolve to a real agent kind, got %q", k)
+		}
+	}
+	if k := resumeKind(cfg, Bead{Assignee: "codex"}, ""); k != "codex" {
+		t.Fatalf("the claimer's kind wins over auto, got %q", k)
+	}
+}

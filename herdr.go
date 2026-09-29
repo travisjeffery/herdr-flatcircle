@@ -29,6 +29,9 @@ type Agent struct {
 
 type Herdr struct {
 	bin string
+	// socket, when set, pins every call to that server instead of the one in
+	// the environment.
+	socket string
 }
 
 func newHerdr() Herdr {
@@ -39,11 +42,33 @@ func newHerdr() Herdr {
 	return Herdr{bin: bin}
 }
 
+// on returns h pinned to the herdr server at socket.
+func (h Herdr) on(socket string) Herdr {
+	h.socket = socket
+	return h
+}
+
+// pinSocket rewrites env so herdr targets socket. HERDR_SESSION goes too: herdr
+// resolves a session name to its own socket when HERDR_SOCKET_PATH is unset.
+func pinSocket(env []string, socket string) []string {
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "HERDR_SOCKET_PATH=") || strings.HasPrefix(kv, "HERDR_SESSION=") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, "HERDR_SOCKET_PATH="+socket)
+}
+
 // call runs a herdr API command and returns its .result object.
 func (h Herdr) call(timeout time.Duration, args ...string) (json.RawMessage, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, h.bin, args...)
+	if h.socket != "" {
+		cmd.Env = pinSocket(os.Environ(), h.socket)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {

@@ -218,7 +218,7 @@ func openCoordinator(cfg Config, h Herdr, kind string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	_ = tickerStart()
+	_ = tickerStart(cfg)
 	first := "Run `shepherd context` and give me a short status: what needs me, what's in review, what's ready to start."
 	if err := h.AgentStart(cfg.CoordinatorName, kind, opened.PaneID); err != nil {
 		if !strings.Contains(err.Error(), "agent_not_ready") {

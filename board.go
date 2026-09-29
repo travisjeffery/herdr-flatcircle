@@ -105,7 +105,8 @@ func runBoard(cfg Config) error {
 	fmt.Print("\x1b[?1049h\x1b[?25l")
 	defer fmt.Print("\x1b[?25h\x1b[?1049l")
 
-	h := newHerdr()
+	// The same server loadBoard reads, so focus and dispatch act on the agents shown.
+	h := newHerdr().on(cfg.coordSocket())
 	rows, err := loadBoard(cfg)
 	status := ""
 	if err != nil {

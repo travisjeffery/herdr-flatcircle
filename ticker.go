@@ -75,7 +75,7 @@ type Ticker struct {
 }
 
 func newTicker(cfg Config, logger *log.Logger) Ticker {
-	return Ticker{cfg: cfg, herdr: newHerdr(), beads: Beads{}, gh: GH{repo: cfg.Repo}, log: logger}
+	return Ticker{cfg: cfg, herdr: newHerdr().on(cfg.coordSocket()), beads: Beads{}, gh: GH{repo: cfg.Repo}, log: logger}
 }
 
 // gather joins beads, agents and PRs into threads. Only beads a worker could
@@ -333,16 +333,68 @@ func (t Ticker) nudgeCoordinator(st *TickerState, agents map[string]Agent, now t
 func pidPath() string { return filepath.Join(stateDir(), "ticker.pid") }
 func logPath() string { return filepath.Join(stateDir(), "ticker.log") }
 
+// socketFile records the herdr socket the running ticker follows.
+func socketFile() string { return filepath.Join(stateDir(), "ticker.socket") }
+
+// runningSocket is the socket the running ticker follows, "" if it is not
+// running or predates socketFile.
+func runningSocket() string {
+	if runningPID() == 0 {
+		return ""
+	}
+	b, err := os.ReadFile(socketFile())
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
+func sameSocket(a, b string) bool { return filepath.Clean(a) == filepath.Clean(b) }
+
+// socketWarning explains why the ticker may not see the coordinator: it follows
+// ticker, herdr_socket names configured, and the caller runs on here ("" outside
+// herdr). "" when nothing is off or the ticker's socket is unknown.
+func socketWarning(ticker, configured, here string) string {
+	switch {
+	case ticker == "":
+		return ""
+	case here != "" && !sameSocket(ticker, here):
+		return fmt.Sprintf("the ticker follows the herdr server at %s, not this one (%s), so it sees none of the agents here; set herdr_socket = %q in %s and run `shepherd ticker start`", ticker, here, here, filepath.Join(configDir(), "config.toml"))
+	case !sameSocket(ticker, configured):
+		return fmt.Sprintf("the ticker follows %s but herdr_socket is %s; run `shepherd ticker start` to move it", ticker, configured)
+	}
+	return ""
+}
+
 func runningPID() int {
 	b, err := os.ReadFile(pidPath())
 	if err != nil {
 		return 0
 	}
 	pid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
-	if pid <= 0 || syscall.Kill(pid, 0) != nil {
+	if pid <= 0 || syscall.Kill(pid, 0) != nil || !isTicker(pid) {
 		return 0
 	}
 	return pid
+}
+
+// isTicker reports whether pid is a `shepherd ticker run`, so a stale pid file
+// whose pid was reused never gets another process signalled. Without ps it
+// trusts the pid file.
+func isTicker(pid int) bool {
+	if pid == os.Getpid() {
+		return true
+	}
+	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "args=").Output()
+	if err != nil {
+		var exit *exec.ExitError
+		return !errors.As(err, &exit)
+	}
+	return tickerArgs(string(out))
+}
+
+func tickerArgs(args string) bool {
+	return strings.HasSuffix(strings.TrimSpace(args), " ticker run")
 }
 
 func tickerRun(cfg Config) error {
@@ -356,13 +408,17 @@ func tickerRun(cfg Config) error {
 		return err
 	}
 	defer os.Remove(pidPath())
+	if err := os.WriteFile(socketFile(), []byte(cfg.coordSocket()), 0o644); err != nil {
+		return err
+	}
+	defer os.Remove(socketFile())
 	f, err := os.OpenFile(logPath(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 	logger := log.New(f, "", log.LstdFlags)
-	logger.Printf("ticker %s started, every %s", version, cfg.tick())
+	logger.Printf("ticker %s started, every %s, on %s", version, cfg.tick(), cfg.coordSocket())
 	t := newTicker(cfg, logger)
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
@@ -385,10 +441,22 @@ func tickerRun(cfg Config) error {
 	}
 }
 
-func tickerStart() error {
+func tickerStart(cfg Config) error {
 	if pid := runningPID(); pid != 0 {
-		fmt.Printf("ticker already running (pid %d)\n", pid)
-		return nil
+		sock := runningSocket()
+		if sock != "" && sameSocket(sock, cfg.coordSocket()) {
+			fmt.Printf("ticker already running (pid %d)\n", pid)
+			return nil
+		}
+		// herdr_socket changed since it started, or an older shepherd started it
+		// on whichever server ran startup: follow the configured server.
+		if sock == "" {
+			sock = "an unknown herdr server"
+		}
+		fmt.Printf("ticker (pid %d) is on %s, not %s; restarting it\n", pid, sock, cfg.coordSocket())
+		if err := tickerStop(); err != nil {
+			return err
+		}
 	}
 	self, err := os.Executable()
 	if err != nil {
@@ -413,16 +481,27 @@ func tickerStop() error {
 	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
 		return err
 	}
-	for i := 0; i < 50 && runningPID() != 0; i++ {
+	// A pass can sit in a slow bd, gh or herdr call before it sees SIGTERM.
+	for i := 0; i < 300 && runningPID() != 0; i++ {
 		time.Sleep(100 * time.Millisecond)
+	}
+	if runningPID() == pid {
+		return fmt.Errorf("ticker (pid %d) did not stop within 30s", pid)
 	}
 	fmt.Printf("ticker stopped (pid %d)\n", pid)
 	return nil
 }
 
-func tickerStatus() {
+func tickerStatus(cfg Config) {
 	if pid := runningPID(); pid != 0 {
-		fmt.Printf("ticker running (pid %d), log %s\n", pid, logPath())
+		sock := runningSocket()
+		if sock == "" {
+			sock = "unknown herdr server (started by an older shepherd; restart it)"
+		}
+		fmt.Printf("ticker running (pid %d) on %s, log %s\n", pid, sock, logPath())
+		if w := socketWarning(runningSocket(), cfg.coordSocket(), os.Getenv("HERDR_SOCKET_PATH")); w != "" {
+			fmt.Println("warning:", w)
+		}
 	} else {
 		fmt.Println("ticker not running")
 	}

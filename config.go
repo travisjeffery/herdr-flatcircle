@@ -33,6 +33,9 @@ type Config struct {
 	// Only keys with these team prefixes count as Linear issues; empty accepts
 	// any key outside a small denylist.
 	LinearPrefixes []string `toml:"linear_prefixes"`
+	// HerdrSocket is the herdr server the coordinator runs on. The ticker
+	// always talks to it, whichever server's plugin startup launched it.
+	HerdrSocket string `toml:"herdr_socket"`
 
 	// Repos are named repositories a bead selects with a repo:<name> label;
 	// Repo is the default.
@@ -76,6 +79,7 @@ func loadConfig() (Config, error) {
 		return cfg, err
 	}
 	cfg.Repo, cfg.BeadsDir = expandHome(cfg.Repo), expandHome(cfg.BeadsDir)
+	cfg.HerdrSocket = expandHome(cfg.HerdrSocket)
 	for name, path := range cfg.Repos {
 		cfg.Repos[name] = expandHome(path)
 	}
@@ -136,6 +140,17 @@ func (c Config) allRepos() []string {
 		}
 	}
 	return repos
+}
+
+// coordSocket is the socket of the herdr server the ticker follows: herdr_socket,
+// or herdr's default server. Never the caller's HERDR_SOCKET_PATH: every server
+// that loads the plugin runs startup, and a ticker on a server without the
+// coordinator sees no agents.
+func (c Config) coordSocket() string {
+	if c.HerdrSocket != "" {
+		return c.HerdrSocket
+	}
+	return defaultHerdrSocket()
 }
 
 func (c Config) tick() time.Duration { return time.Duration(max(c.TickSeconds, 5)) * time.Second }

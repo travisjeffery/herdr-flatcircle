@@ -394,7 +394,17 @@ nudge = true              # prompt the coordinator when there's news
 auto_resolve = false      # remove a merged, closed bead's worktree automatically
 repos = { infra = "~/src/infra", model = "~/src/model" }
 linear_prefixes = ["ENG"] # Linear team keys to recognise; empty accepts any KEY-123
+herdr_socket = "~/.config/herdr/herdr.sock"  # the herdr server the coordinator runs on
 ```
+
+The ticker always follows `herdr_socket` (herdr's default server unless set),
+not the server that happened to start it: every herdr server that loads the
+plugin runs its startup, and a ticker on a server without the coordinator
+sees no agents. If the coordinator runs in a named session, set it to that
+session's socket (`~/.config/herdr/sessions/<name>/herdr.sock`).
+`shepherd ticker status` prints the socket the ticker follows, `shepherd
+context` warns when it isn't the coordinator's, and `shepherd ticker start`
+moves a ticker that is on the wrong one.
 
 `repo` is the default repository. A bead whose work is in another one carries
 the label `repo:<name>` for a name in `repos` (`bd label add <bead> repo:infra`);
@@ -420,7 +430,7 @@ configured repository falls back to `repo` and shows as a warning in
 | `shepherd sweep [--yes]` | List finished worktrees across every repo; `--yes` removes only the safe ones. |
 | `shepherd report [--since 24h\|7d\|DATE]` | Markdown summary of what shipped, what's in flight and what needs you. |
 | `shepherd board` | The board popup (`prefix+j`). |
-| `shepherd ticker run\|start\|stop\|status`, `shepherd tick` | The background loop, or one pass of it in the foreground. |
+| `shepherd ticker run\|start\|stop\|status`, `shepherd tick` | The background loop, or one pass of it in the foreground. `status` shows the herdr socket it follows. |
 | `shepherd configure` / `unconfigure` | Install, or remove, the agent view and sidebar tokens. |
 
 `K` is `claude`, `codex` or `auto`.

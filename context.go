@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"maps"
+	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -53,6 +54,8 @@ func renderContext(cfg Config, threads []Thread, next, ready []Bead, inbox []Inb
 	}
 	if pid := runningPID(); pid == 0 {
 		s.WriteString("\nWARNING: the ticker is not running (`shepherd ticker start`); nothing follows PRs or updates the sidebar.\n")
+	} else if w := socketWarning(runningSocket(), cfg.coordSocket(), os.Getenv("HERDR_SOCKET_PATH")); w != "" {
+		fmt.Fprintf(&s, "\nWARNING: %s.\n", w)
 	}
 
 	s.WriteString("\n## Inbox (unhandled; `shepherd inbox done [bead...]` when dealt with)\n")

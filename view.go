@@ -28,10 +28,16 @@ type rpc interface {
 
 type socketRPC struct{ path string }
 
+// herdrSocket is the socket of the herdr server this process runs under.
 func herdrSocket() string {
 	if p := os.Getenv("HERDR_SOCKET_PATH"); p != "" {
 		return p
 	}
+	return defaultHerdrSocket()
+}
+
+// defaultHerdrSocket is the socket of herdr's default (unnamed) session.
+func defaultHerdrSocket() string {
 	d, _ := os.UserConfigDir()
 	return filepath.Join(d, "herdr", "herdr.sock")
 }

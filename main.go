@@ -191,11 +191,11 @@ func run(args []string) error {
 		case "run":
 			return tickerRun(cfg)
 		case "start":
-			return tickerStart()
+			return tickerStart(cfg)
 		case "stop":
 			return tickerStop()
 		case "status":
-			tickerStatus()
+			tickerStatus(cfg)
 		default:
 			return fmt.Errorf("unknown ticker command %q", pos[0])
 		}
@@ -212,7 +212,7 @@ func run(args []string) error {
 		if err := setView(socketRPC{herdrSocket()}); err != nil {
 			fmt.Fprintln(os.Stderr, "shepherd: agent view:", err)
 		}
-		return tickerStart()
+		return tickerStart(cfg)
 	case "configure":
 		lines, err := configure(cfg, *repoFlag)
 		fmt.Print(strings.Join(append(lines, ""), "\n"))

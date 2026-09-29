@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -86,6 +87,34 @@ func TestSocketWarning(t *testing.T) {
 		got := socketWarning(c.ticker, c.configured, c.here)
 		if (c.want == "") != (got == "") || !strings.Contains(got, c.want) {
 			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestRunningPIDIgnoresReusedPID(t *testing.T) {
+	t.Setenv("SHEPHERD_STATE_DIR", t.TempDir())
+	other := exec.Command("sleep", "30")
+	if err := other.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer other.Process.Kill()
+	if err := os.WriteFile(pidPath(), []byte(strconv.Itoa(other.Process.Pid)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if pid := runningPID(); pid != 0 {
+		t.Fatalf("took pid %d of an unrelated process for the ticker", pid)
+	}
+}
+
+func TestTickerArgs(t *testing.T) {
+	for args, want := range map[string]bool{
+		"/home/tj/.config/herdr/plugins/shepherd/bin/shepherd ticker run\n": true,
+		"shepherd ticker run":    true,
+		"sleep 30":               false,
+		"shepherd ticker status": false,
+	} {
+		if got := tickerArgs(args); got != want {
+			t.Errorf("tickerArgs(%q) = %v", args, got)
 		}
 	}
 }

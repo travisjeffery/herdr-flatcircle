@@ -372,10 +372,29 @@ func runningPID() int {
 		return 0
 	}
 	pid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
-	if pid <= 0 || syscall.Kill(pid, 0) != nil {
+	if pid <= 0 || syscall.Kill(pid, 0) != nil || !isTicker(pid) {
 		return 0
 	}
 	return pid
+}
+
+// isTicker reports whether pid is a `shepherd ticker run`, so a stale pid file
+// whose pid was reused never gets another process signalled. Without ps it
+// trusts the pid file.
+func isTicker(pid int) bool {
+	if pid == os.Getpid() {
+		return true
+	}
+	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "args=").Output()
+	if err != nil {
+		var exit *exec.ExitError
+		return !errors.As(err, &exit)
+	}
+	return tickerArgs(string(out))
+}
+
+func tickerArgs(args string) bool {
+	return strings.HasSuffix(strings.TrimSpace(args), " ticker run")
 }
 
 func tickerRun(cfg Config) error {
@@ -425,11 +444,15 @@ func tickerRun(cfg Config) error {
 func tickerStart(cfg Config) error {
 	if pid := runningPID(); pid != 0 {
 		sock := runningSocket()
-		if sock == "" || sameSocket(sock, cfg.coordSocket()) {
+		if sock != "" && sameSocket(sock, cfg.coordSocket()) {
 			fmt.Printf("ticker already running (pid %d)\n", pid)
 			return nil
 		}
-		// herdr_socket changed since it started: follow the configured server.
+		// herdr_socket changed since it started, or an older shepherd started it
+		// on whichever server ran startup: follow the configured server.
+		if sock == "" {
+			sock = "an unknown herdr server"
+		}
 		fmt.Printf("ticker (pid %d) is on %s, not %s; restarting it\n", pid, sock, cfg.coordSocket())
 		if err := tickerStop(); err != nil {
 			return err
@@ -458,8 +481,12 @@ func tickerStop() error {
 	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
 		return err
 	}
-	for i := 0; i < 50 && runningPID() != 0; i++ {
+	// A pass can sit in a slow bd, gh or herdr call before it sees SIGTERM.
+	for i := 0; i < 300 && runningPID() != 0; i++ {
 		time.Sleep(100 * time.Millisecond)
+	}
+	if runningPID() == pid {
+		return fmt.Errorf("ticker (pid %d) did not stop within 30s", pid)
 	}
 	fmt.Printf("ticker stopped (pid %d)\n", pid)
 	return nil

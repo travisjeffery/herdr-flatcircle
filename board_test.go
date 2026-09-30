@@ -89,3 +89,31 @@ func TestBoardFilterKeys(t *testing.T) {
 		t.Fatal("backspace on an empty query reported a change")
 	}
 }
+
+func TestSplitKeys(t *testing.T) {
+	keys, rest := splitKeys([]byte("/wid\x1b[Aé\r\x1b\x7f"))
+	want := []string{"/", "w", "i", "d", "\x1b[A", "é", "\r", "\x1b", "\x7f"}
+	if !slices.Equal(keys, want) || rest != nil {
+		t.Fatalf("splitKeys = %q rest %q, want %q", keys, rest, want)
+	}
+	// A rune split across reads waits for its tail.
+	e := []byte("é")
+	keys, rest = splitKeys(append([]byte("a"), e[0]))
+	if !slices.Equal(keys, []string{"a"}) || string(rest) != string(e[:1]) {
+		t.Fatalf("split rune: keys %q rest %q", keys, rest)
+	}
+	if keys, _ = splitKeys(append(rest, e[1])); !slices.Equal(keys, []string{"é"}) {
+		t.Fatalf("rejoined rune: %q", keys)
+	}
+}
+
+func TestPastedFilterIsTypedAndKept(t *testing.T) {
+	f := boardFilter{typing: true}
+	keys, _ := splitKeys([]byte("widgets\r"))
+	for _, k := range keys {
+		f.key(k)
+	}
+	if f.query != "widgets" || f.typing {
+		t.Fatalf("pasted filter = %+v, want widgets kept", f)
+	}
+}

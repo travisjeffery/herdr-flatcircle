@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/term"
 )
@@ -168,13 +169,39 @@ func (f *boardFilter) key(k string) bool {
 		f.query = ""
 		return true
 	}
-	for _, r := range k {
-		if !unicode.IsPrint(r) {
-			return false // arrows and other escape sequences
-		}
+	if r, _ := utf8.DecodeRuneInString(k); len(k) == 0 || !unicode.IsPrint(r) || utf8.RuneCountInString(k) != 1 {
+		return false // arrows and other controls
 	}
 	f.query += k
 	return true
+}
+
+// splitKeys cuts one read's bytes into keypresses: a read can hold several
+// (a paste, fast typing) or end inside a UTF-8 rune, which comes back as rest
+// to prefix the next read. Escape sequences (arrows) stay whole; a lone ESC
+// is the Esc key.
+func splitKeys(b []byte) (keys []string, rest []byte) {
+	for len(b) > 0 {
+		n := 1
+		switch {
+		case b[0] == 0x1b && len(b) >= 2 && (b[1] == '[' || b[1] == 'O'):
+			n = 2
+			if b[1] == '[' {
+				for n < len(b) && (b[n] < 0x40 || b[n] > 0x7e) {
+					n++
+				}
+			}
+			n = min(n+1, len(b))
+		case b[0] >= utf8.RuneSelf:
+			if !utf8.FullRune(b) {
+				return keys, b
+			}
+			_, n = utf8.DecodeRune(b)
+		}
+		keys = append(keys, string(b[:n]))
+		b = b[n:]
+	}
+	return keys, nil
 }
 
 func nextSelectable(rows []boardRow, from, dir int) int {
@@ -212,15 +239,24 @@ func runBoard(cfg Config) error {
 		rows = filterRows(all, filter.query)
 		cur = nextSelectable(rows, 0, 1)
 	}
-	buf := make([]byte, 64)
+	buf := make([]byte, 256)
+	var keys []string
+	var partial []byte
 	for {
-		drawBoard(rows, cur, status, filter)
-		n, err := os.Stdin.Read(buf)
-		if err != nil {
-			return err
+		if len(keys) == 0 {
+			drawBoard(rows, cur, status, filter)
+			n, err := os.Stdin.Read(buf)
+			if err != nil {
+				return err
+			}
+			keys, partial = splitKeys(append(partial, buf[:n]...))
+			status = ""
+			if len(keys) == 0 {
+				continue
+			}
 		}
-		key := string(buf[:n])
-		status = ""
+		key := keys[0]
+		keys = keys[1:]
 		if key == "\x03" {
 			return nil
 		}

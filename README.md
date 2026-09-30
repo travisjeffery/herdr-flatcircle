@@ -307,7 +307,10 @@ the same `shepherd context`.
 The board (`prefix+j`) lists threads by state plus the beads you've marked
 `next` and other ready beads: `↵` focus or start, `c`/`x` start with Claude or
 Codex, `n` toggle `next`, `y` copy the id, `p` copy a thread's pending
-`RUN:` command, `r` refresh, `q` quit.
+`RUN:` command, `/` filter, `r` refresh, `q` quit. `/` narrows the rows as
+you type, matching bead id, title, agent, state, PR number or repo and Linear
+key (every word, any case); `↵` keeps the filter and goes back to the keys
+above, which then act on the filtered rows, and `esc` clears it.
 
 ## Getting started
 

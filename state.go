@@ -53,12 +53,19 @@ func agentReady(a *Agent) bool {
 	return a != nil && (a.Status == "idle" || a.Status == "done")
 }
 
+// answered reports a needs_me bead whose agent is working again: the user
+// answered it in its pane, or it is still in the turn that asked. Either way
+// nobody is waiting on the user yet.
+func answered(t Thread) bool {
+	return t.Bead.Status == StatusNeedsMe && t.Agent != nil && t.Agent.Status == "working"
+}
+
 // classify decides a thread's group. Precedence matters: a human owed an
 // answer outranks everything, and a merged PR outranks review because the
 // only thing left is closing up.
 func classify(t Thread) Group {
 	switch {
-	case t.Bead.Status == StatusNeedsMe, t.Agent != nil && t.Agent.Status == "blocked":
+	case t.Bead.Status == StatusNeedsMe && !answered(t), t.Agent != nil && t.Agent.Status == "blocked":
 		return GroupNeedsYou
 	case t.PR != nil && t.PR.State == "MERGED" && t.Bead.HasLabel(LabelRollingOut):
 		return GroupRollingOut
@@ -106,7 +113,7 @@ func pendingCommand(notes string) string {
 // runCommand is the pending command of a needs_me thread, the only state in
 // which one is still waiting on the user.
 func runCommand(t Thread) string {
-	if t.Bead.Status != StatusNeedsMe {
+	if t.Bead.Status != StatusNeedsMe || answered(t) {
 		return ""
 	}
 	return pendingCommand(t.Bead.Notes)
@@ -115,6 +122,9 @@ func runCommand(t Thread) string {
 func stateLine(t Thread) string {
 	g := classify(t)
 	s := g.String()
+	if answered(t) {
+		s += " · needs_me"
+	}
 	if runCommand(t) != "" {
 		s += " · run command"
 	}
@@ -157,6 +167,8 @@ type Snapshot struct {
 	ReviewsSplit bool              `json:"reviews_split"`
 	Runs         map[string]string `json:"runs,omitempty"`
 	Pending      []string          `json:"pending_prompts"`
+	// NeedsMe is the bead's needs_me status at this snapshot.
+	NeedsMe bool `json:"needs_me"`
 }
 
 type EventKind string
@@ -168,6 +180,7 @@ const (
 	EventMerged       EventKind = "merged"
 	EventFinished     EventKind = "finished"
 	EventAgentGone    EventKind = "agent_gone"
+	EventResumed      EventKind = "resumed"
 	EventRunSucceeded EventKind = "run_succeeded"
 	EventRunFailed    EventKind = "run_failed"
 )
@@ -185,10 +198,17 @@ type Outcome struct {
 	// Prompts go to the thread's agent once it has been ready long enough.
 	Prompts []string
 	Notify  bool
+	// Resume sets a needs_me bead back to in_progress: its agent went back to
+	// work after the question was asked, so the user answered it in the pane.
+	Resume bool
 }
 
+// resumeNote is the note left on a bead the ticker resumed; the question
+// stays in the notes above it.
+const resumeNote = "auto: agent resumed after needs_me"
+
 func snapshot(t Thread, prev Snapshot, now time.Time) Snapshot {
-	s := Snapshot{Group: classify(t), Reviews: t.Reviews, BotReviews: len(t.BotReviews), ReviewsSplit: true, Runs: runStates(t.Runs), Failing: t.Checks.Failing, Pending: prev.Pending}
+	s := Snapshot{Group: classify(t), Reviews: t.Reviews, BotReviews: len(t.BotReviews), ReviewsSplit: true, Runs: runStates(t.Runs), Failing: t.Checks.Failing, Pending: prev.Pending, NeedsMe: t.Bead.Status == StatusNeedsMe}
 	if t.Agent != nil {
 		s.AgentStatus, s.AgentSeq = t.Agent.Status, t.Agent.Seq
 		switch {
@@ -216,6 +236,12 @@ func transition(t Thread, prev Snapshot, first bool, now time.Time) Outcome {
 	g := classify(t)
 	ev := func(k EventKind, format string, a ...any) {
 		o.Events = append(o.Events, Event{Bead: id, Kind: k, Summary: fmt.Sprintf(format, a...), At: now})
+	}
+	// Only a needs_me that was already settled, with the agent at rest, counts:
+	// the turn that asked the question is itself still working.
+	if answered(t) && prev.NeedsMe && (agentReady(&Agent{Status: prev.AgentStatus}) || prev.AgentStatus == "blocked") {
+		o.Resume = true
+		ev(EventResumed, "%s went back to work after needs_me; set it to in_progress", id)
 	}
 	if g == GroupNeedsYou && prev.Group != GroupNeedsYou {
 		o.Notify = true

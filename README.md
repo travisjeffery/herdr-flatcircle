@@ -160,7 +160,11 @@ Inbox event kinds: `needs_you`, `checks_failing`, `new_review`, `merged`,
   a minute, when it's the only agent in an active bead's worktree.
 - **Needs you.** A thread needs you when its bead is `needs_me` (the question
   is its latest note) or its agent is stopped at a permission or question
-  prompt.
+  prompt. Answer it in its pane and it drops out of needs you as soon as the
+  agent is working again (`working · needs_me`). On its next pass the ticker
+  sets the bead back to `in_progress` with the note `auto: agent resumed after
+  needs_me`, which keeps the question in the history. The ticker holds its own
+  prompts to a `needs_me` thread until then, so they never count as your answer.
 - **Commands only you can run** (a classifier denial, an interactive login, a
   production change) come back as a `RUN: <command>` note on a `needs_me`
   bead. The sidebar shows `needs you · run command`, the coordinator relays it

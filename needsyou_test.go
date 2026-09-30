@@ -78,3 +78,68 @@ func TestAnsweredRunCommandIsNotOfferedAgain(t *testing.T) {
 		t.Fatalf("RUN: plus its why should be pending, got %q", got)
 	}
 }
+
+func TestNeedsMeWhileWorkingIsWorking(t *testing.T) {
+	th := thread(bead(StatusNeedsMe), agent("working", 2), nil)
+	if g := classify(th); g != GroupWorking {
+		t.Fatalf("an answered needs_me should be working, got %s", g)
+	}
+	th.Bead.Notes = "RUN: aws sso login"
+	if got := stateLine(th); got != "working · needs_me" {
+		t.Errorf("got %q", got)
+	}
+	if got := runCommand(th); got != "" {
+		t.Errorf("a working agent is not waiting on a command, got %q", got)
+	}
+	if g := classify(thread(bead(StatusNeedsMe), agent("blocked", 2), nil)); g != GroupNeedsYou {
+		t.Errorf("needs_me at an approval prompt still needs you, got %s", g)
+	}
+	if g := classify(thread(bead(StatusInProgress), agent("blocked", 2), nil)); g != GroupNeedsYou {
+		t.Errorf("an approval prompt needs you, got %s", g)
+	}
+}
+
+func TestAnsweredInThePaneResumes(t *testing.T) {
+	for _, from := range []string{"idle", "done", "blocked"} {
+		prev := Snapshot{Group: GroupNeedsYou, AgentStatus: from, AgentSeq: 5, NeedsMe: true}
+		o := transition(thread(bead(StatusNeedsMe), agent("working", 6), nil), prev, false, t0)
+		if !o.Resume || len(o.Events) != 1 || o.Events[0].Kind != EventResumed {
+			t.Errorf("from %s: want a resume, got %+v", from, o)
+		}
+	}
+}
+
+func TestTheTurnThatAsksDoesNotResume(t *testing.T) {
+	// The worker sets needs_me mid-turn: the ticker first sees it working.
+	prev := Snapshot{Group: GroupWorking, AgentStatus: "working", AgentSeq: 5}
+	th := thread(bead(StatusNeedsMe), agent("working", 5), nil)
+	if o := transition(th, prev, false, t0); o.Resume || o.Notify {
+		t.Fatalf("the asking turn resumed or notified: %+v", o)
+	}
+	// It stops: now it needs the user.
+	prev = snapshot(th, prev, t0)
+	idle := thread(bead(StatusNeedsMe), agent("idle", 6), nil)
+	if o := transition(idle, prev, false, t0); o.Resume || !o.Notify {
+		t.Fatalf("want a needs-you notify on stopping, got %+v", o)
+	}
+	// An approval prompt then needs_me in the same turn is not an answer either.
+	prev = Snapshot{Group: GroupNeedsYou, AgentStatus: "blocked", AgentSeq: 5}
+	if o := transition(th, prev, false, t0); o.Resume {
+		t.Fatalf("needs_me set after the last look resumed: %+v", o)
+	}
+}
+
+func TestResumeLeavesSnapshotInProgress(t *testing.T) {
+	th := thread(bead(StatusInProgress), agent("working", 6), nil)
+	s := snapshot(th, Snapshot{NeedsMe: true}, t0)
+	if s.NeedsMe || s.Group != GroupWorking {
+		t.Fatalf("got %+v", s)
+	}
+}
+
+func TestBriefAsksToResumeWhenAnswered(t *testing.T) {
+	s := brief(bead(StatusInProgress), "tj/x", "/w/x", "", "")
+	if !strings.Contains(s, "When the user answers you, directly in this pane or otherwise, run `bd update backend-ab12 --status in_progress` first.") {
+		t.Fatalf("brief lacks the resume rule:\n%s", s)
+	}
+}

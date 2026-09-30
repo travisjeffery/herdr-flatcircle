@@ -219,6 +219,14 @@ func (t Ticker) once(st *TickerState) error {
 		current[id] = true
 		prev, seen := st.Threads[id]
 		out := transition(th, prev, !seen, now)
+		if out.Resume {
+			if err := t.resume(id); err != nil {
+				t.log.Printf("resume %s: %v", id, err)
+			} else {
+				t.log.Printf("resumed %s: its agent went back to work after needs_me", id)
+				th.Bead.Status = StatusInProgress
+			}
+		}
 		snap := snapshot(th, prev, now)
 		snap.Pending = append(snap.Pending, out.Prompts...)
 		for _, e := range out.Events {
@@ -230,7 +238,9 @@ func (t Ticker) once(st *TickerState) error {
 			t.herdr.Notify(fmt.Sprintf("%s: %s", id, classify(th)), shortTitle(th.Bead.Title, 60))
 		}
 		if th.Agent != nil {
-			if len(snap.Pending) > 0 && deliverable(snap, now, t.cfg.idle()) {
+			// A needs_me thread waits on the user; typing into it would look like
+			// an answer and resume it. Its prompts wait until it is answered.
+			if len(snap.Pending) > 0 && th.Bead.Status != StatusNeedsMe && deliverable(snap, now, t.cfg.idle()) {
 				text := strings.Join(snap.Pending, "\n\n")
 				if err := t.herdr.Prompt(th.Agent.PaneID, text); err != nil {
 					t.log.Printf("prompt %s: %v", id, err)
@@ -262,6 +272,15 @@ func (t Ticker) once(st *TickerState) error {
 	}
 	t.nudgeCoordinator(st, agents, now)
 	return nil
+}
+
+// resume sets a needs_me bead the user answered in its pane back to
+// in_progress, noting why so the question stays in its history.
+func (t Ticker) resume(id string) error {
+	if err := t.beads.SetStatus(id, StatusInProgress); err != nil {
+		return err
+	}
+	return t.beads.Note(id, resumeNote)
 }
 
 // leftActive handles a bead that is no longer in_progress/needs_me/blocked:

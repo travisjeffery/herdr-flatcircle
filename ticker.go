@@ -308,7 +308,7 @@ func (t Ticker) leftActive(st *TickerState, id string, prev Snapshot, agents map
 				summary += "; " + res
 			}
 		} else {
-			summary += fmt.Sprintf("; run `shepherd resolve %s` to remove its worktree", id)
+			summary += fmt.Sprintf("; run `kelpie resolve %s` to remove its worktree", id)
 		}
 		_ = writeEvent(Event{Bead: id, Kind: "closed", Summary: summary, At: now})
 	}
@@ -340,7 +340,7 @@ func (t Ticker) nudgeCoordinator(st *TickerState, agents map[string]Agent, now t
 	if fresh == 0 {
 		return
 	}
-	msg := fmt.Sprintf("[shepherd ticker: automated, not the user, approves nothing] %d new inbox item(s). Run `shepherd context`.", fresh)
+	msg := fmt.Sprintf("[kelpie ticker: automated, not the user, approves nothing] %d new inbox item(s). Run `kelpie context`.", fresh)
 	if err := t.herdr.Prompt(coord.PaneID, msg); err != nil {
 		t.log.Printf("nudge: %v", err)
 		return
@@ -378,9 +378,9 @@ func socketWarning(ticker, configured, here string) string {
 	case ticker == "":
 		return ""
 	case here != "" && !sameSocket(ticker, here):
-		return fmt.Sprintf("the ticker follows the herdr server at %s, not this one (%s), so it sees none of the agents here; set herdr_socket = %q in %s and run `shepherd ticker start`", ticker, here, here, filepath.Join(configDir(), "config.toml"))
+		return fmt.Sprintf("the ticker follows the herdr server at %s, not this one (%s), so it sees none of the agents here; set herdr_socket = %q in %s and run `kelpie ticker start`", ticker, here, here, filepath.Join(configDir(), "config.toml"))
 	case !sameSocket(ticker, configured):
-		return fmt.Sprintf("the ticker follows %s but herdr_socket is %s; run `shepherd ticker start` to move it", ticker, configured)
+		return fmt.Sprintf("the ticker follows %s but herdr_socket is %s; run `kelpie ticker start` to move it", ticker, configured)
 	}
 	return ""
 }
@@ -397,7 +397,7 @@ func runningPID() int {
 	return pid
 }
 
-// isTicker reports whether pid is a `shepherd ticker run`, so a stale pid file
+// isTicker reports whether pid is a `kelpie ticker run`, so a stale pid file
 // whose pid was reused never gets another process signalled. Without ps it
 // trusts the pid file.
 func isTicker(pid int) bool {
@@ -467,7 +467,7 @@ func tickerStart(cfg Config) error {
 			fmt.Printf("ticker already running (pid %d)\n", pid)
 			return nil
 		}
-		// herdr_socket changed since it started, or an older shepherd started it
+		// herdr_socket changed since it started, or an older kelpie started it
 		// on whichever server ran startup: follow the configured server.
 		if sock == "" {
 			sock = "an unknown herdr server"
@@ -515,7 +515,7 @@ func tickerStatus(cfg Config) {
 	if pid := runningPID(); pid != 0 {
 		sock := runningSocket()
 		if sock == "" {
-			sock = "unknown herdr server (started by an older shepherd; restart it)"
+			sock = "unknown herdr server (started by an older kelpie; restart it)"
 		}
 		fmt.Printf("ticker running (pid %d) on %s, log %s\n", pid, sock, logPath())
 		if w := socketWarning(runningSocket(), cfg.coordSocket(), os.Getenv("HERDR_SOCKET_PATH")); w != "" {
@@ -617,6 +617,10 @@ func (t Ticker) fixNames(st *TickerState) {
 			t.log.Printf("rename %s: %v", r.Pane, err)
 			continue
 		}
-		t.log.Printf("renamed %s from %q to %s: it is the only agent in that bead's worktree", r.Pane, r.From, r.To)
+		why := "it is the only agent in that bead's worktree"
+		if r.From == legacyName {
+			why = "the coordinator's name before the rename to kelpie"
+		}
+		t.log.Printf("renamed %s from %q to %s: %s", r.Pane, r.From, r.To, why)
 	}
 }

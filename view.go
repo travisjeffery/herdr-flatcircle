@@ -12,13 +12,15 @@ import (
 
 // A "plugin:<id>" source makes the view plugin-owned: herdr clears it itself
 // when the plugin is unlinked, uninstalled or disabled, so it cannot outlive
-// shepherd the way herdr-projects' plain-source view did.
+// kelpie the way herdr-projects' plain-source view did.
 const (
-	viewSource = "plugin:shepherd"
-	viewLabel  = "shepherd"
-	// legacyViewSource is cleared too, in case a view was set under it by hand.
-	legacyViewSource = "shepherd"
+	viewSource = "plugin:kelpie"
+	viewLabel  = "kelpie"
 )
+
+// legacyViewSources are cleared too: shepherd's plugin view from before the
+// rename, and a view set under the bare name by hand.
+var legacyViewSources = []string{"plugin:" + legacyName, legacyName, "kelpie"}
 
 // rpc is herdr's socket API: one JSON request per line, one response per line.
 // Views have no CLI subcommand.
@@ -49,7 +51,7 @@ func (s socketRPC) Call(method string, params any) (json.RawMessage, error) {
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
-	req, err := json.Marshal(map[string]any{"id": "shepherd", "method": method, "params": params})
+	req, err := json.Marshal(map[string]any{"id": "kelpie", "method": method, "params": params})
 	if err != nil {
 		return nil, err
 	}
@@ -87,12 +89,12 @@ type viewSpec struct {
 	Sort   []viewSort `json:"sort"`
 }
 
-// shepherdView sorts threads by the ticker's sh_rank token ("<group>-<bead>",
+// kelpieView sorts threads by the ticker's sh_rank token ("<group>-<bead>",
 // needs you first). Herdr orders an agent without the token after every agent
 // with it, so non-thread agents follow the threads and nothing is hidden. A
 // view's sort replaces agent_panel_sort, so attention and recency come back as
 // tie-breakers.
-func shepherdView() viewSpec {
+func kelpieView() viewSpec {
 	return viewSpec{
 		Source: viewSource,
 		Label:  viewLabel,
@@ -104,16 +106,16 @@ func shepherdView() viewSpec {
 	}
 }
 
-// setView installs shepherd's view. Herdr holds a single view and a set
+// setView installs kelpie's view. Herdr holds a single view and a set
 // replaces it, so calling this on every startup or configure is idempotent.
 func setView(c rpc) error {
-	_, err := c.Call("agent.view.set", shepherdView())
+	_, err := c.Call("agent.view.set", kelpieView())
 	return err
 }
 
-// clearView removes shepherd's view and leaves any other source's view alone.
+// clearView removes kelpie's view and leaves any other source's view alone.
 func clearView(c rpc) error {
-	for _, source := range []string{viewSource, legacyViewSource} {
+	for _, source := range append([]string{viewSource}, legacyViewSources...) {
 		if _, err := c.Call("agent.view.clear", map[string]string{"source": source}); err != nil {
 			return err
 		}
@@ -121,7 +123,7 @@ func clearView(c rpc) error {
 	return nil
 }
 
-// unconfigure removes everything shepherd put into herdr: its view and the
+// unconfigure removes everything kelpie put into herdr: its view and the
 // sidebar tokens on every agent pane.
 func unconfigure(c rpc, agents func() ([]Agent, error), clearTokens func(pane string)) error {
 	if err := clearView(c); err != nil {

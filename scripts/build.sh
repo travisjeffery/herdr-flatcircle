@@ -1,22 +1,29 @@
 #!/bin/sh
-# Herdr runs this as the plugin's build step. It puts the shepherd binary at
-# bin/shepherd: the prebuilt release named by herdr-plugin.toml's version,
-# checked against the release's SHA256SUMS, or `go build` when there is no such
-# release, it can't be verified, or this checkout isn't that release.
+# Herdr runs this as the plugin's build step. It puts the kelpie binary at
+# bin/kelpie (with bin/shepherd, the deprecated old name, linked to it): the
+# prebuilt release named by herdr-plugin.toml's version, checked against the
+# release's SHA256SUMS, or `go build` when there is no such release, it can't
+# be verified, or this checkout isn't that release.
 #
-#   SHEPHERD_BUILD=source   always build from source
+#   KELPIE_BUILD=source   always build from source (SHEPHERD_BUILD still works)
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
-say() { printf 'shepherd build: %s\n' "$*" >&2; }
+say() { printf 'kelpie build: %s\n' "$*" >&2; }
 
 from_source() {
   say "$1; building from source"
   command -v go >/dev/null 2>&1 || { say "go is not installed; install Go 1.26+ or use a tagged release"; exit 1; }
-  mkdir -p bin && exec go build -o bin/shepherd .
+  mkdir -p bin && go build -o bin/kelpie . || exit 1
+  alias_old_name
+  exit 0
 }
 
-[ "${SHEPHERD_BUILD:-}" = source ] && from_source "SHEPHERD_BUILD=source"
+# shepherd is the old name; links to it (~/.local/bin/shepherd) keep working
+# through this one, and kelpie prints a deprecation notice when run by it.
+alias_old_name() { ln -sfn kelpie bin/shepherd; }
+
+[ "${KELPIE_BUILD:-${SHEPHERD_BUILD:-}}" = source ] && from_source "KELPIE_BUILD=source"
 
 version=$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' herdr-plugin.toml | head -n 1)
 [ -n "$version" ] || from_source "herdr-plugin.toml has no version"
@@ -47,8 +54,8 @@ case "$(uname -m)" in
   arm64 | aarch64) arch=arm64 ;;
   *) from_source "no prebuilt binary for $(uname -m)" ;;
 esac
-asset="shepherd-$os-$arch"
-base="https://github.com/travisjeffery/herdr-shepherd/releases/download/$tag"
+asset="kelpie-$os-$arch"
+base="https://github.com/travisjeffery/herdr-kelpie/releases/download/$tag"
 
 if command -v curl >/dev/null 2>&1; then
   fetch() { curl -fsSL --retry 2 --connect-timeout 10 -o "$2" "$1"; }
@@ -74,5 +81,6 @@ want=$(awk -v f="$asset" '$2 == f {print $1}' "$tmp/SHA256SUMS")
 [ -n "$want" ] || from_source "SHA256SUMS has no entry for $asset"
 [ "$(sum "$tmp/$asset")" = "$want" ] || from_source "$asset does not match SHA256SUMS"
 
-mkdir -p bin && chmod +x "$tmp/$asset" && mv "$tmp/$asset" bin/shepherd
+mkdir -p bin && chmod +x "$tmp/$asset" && mv "$tmp/$asset" bin/kelpie
+alias_old_name
 say "installed $asset $tag"

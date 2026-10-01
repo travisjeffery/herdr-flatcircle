@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"maps"
 	"os"
@@ -48,7 +49,7 @@ func defaultConfig() Config {
 		BaseBranch:       "main",
 		WorkerAgent:      "claude",
 		CoordinatorAgent: "claude",
-		CoordinatorName:  "shepherd",
+		CoordinatorName:  "kelpie",
 		TickSeconds:      15,
 		GHSeconds:        60,
 		IdleSeconds:      60,
@@ -56,20 +57,82 @@ func defaultConfig() Config {
 	}
 }
 
+// The tool was called shepherd; its config and state lived under that name.
+const legacyName = "shepherd"
+
 func configDir() string {
-	if d := os.Getenv("SHEPHERD_CONFIG_DIR"); d != "" {
+	if d := envDir("KELPIE_CONFIG_DIR", "SHEPHERD_CONFIG_DIR"); d != "" {
 		return d
 	}
 	d, _ := os.UserConfigDir()
-	return filepath.Join(d, "shepherd")
+	return pickDir(filepath.Join(d, "kelpie"), filepath.Join(d, legacyName))
 }
 
 func stateDir() string {
-	if d := os.Getenv("SHEPHERD_STATE_DIR"); d != "" {
+	if d := envDir("KELPIE_STATE_DIR", "SHEPHERD_STATE_DIR"); d != "" {
 		return d
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "state", "shepherd")
+	base := filepath.Join(home, ".local", "state")
+	return pickDir(filepath.Join(base, "kelpie"), filepath.Join(base, legacyName))
+}
+
+func envDir(keys ...string) string {
+	for _, k := range keys {
+		if d := os.Getenv(k); d != "" {
+			return d
+		}
+	}
+	return ""
+}
+
+// pickDir is dir, or the legacy dir while only that one exists (a migration
+// that could not move it).
+func pickDir(dir, legacy string) string {
+	if _, err := os.Stat(dir); err != nil {
+		if fi, err := os.Stat(legacy); err == nil && fi.IsDir() {
+			return legacy
+		}
+	}
+	return dir
+}
+
+// migrateDirs moves shepherd's config and state to kelpie's paths. Directories
+// set through the environment are left where they are.
+func migrateDirs() []string {
+	var out []string
+	if envDir("KELPIE_CONFIG_DIR", "SHEPHERD_CONFIG_DIR") == "" {
+		d, _ := os.UserConfigDir()
+		out = append(out, migrateDir(filepath.Join(d, legacyName), filepath.Join(d, "kelpie"))...)
+	}
+	if envDir("KELPIE_STATE_DIR", "SHEPHERD_STATE_DIR") == "" {
+		home, _ := os.UserHomeDir()
+		base := filepath.Join(home, ".local", "state")
+		out = append(out, migrateDir(filepath.Join(base, legacyName), filepath.Join(base, "kelpie"))...)
+	}
+	return out
+}
+
+// migrateDir renames legacy to dir and leaves a symlink at legacy, so a
+// process still using the old path (a running older ticker, an open
+// coordinator) keeps reading and writing the same files. A rename keeps every
+// file, open ones included; it is idempotent, and does nothing once dir exists
+// or when legacy is missing or already a link.
+func migrateDir(legacy, dir string) []string {
+	fi, err := os.Lstat(legacy)
+	if err != nil || !fi.IsDir() {
+		return nil
+	}
+	if _, err := os.Lstat(dir); err == nil {
+		return []string{fmt.Sprintf("both %s and %s exist; using %s, left %s alone", dir, legacy, dir, legacy)}
+	}
+	if err := os.Rename(legacy, dir); err != nil {
+		return []string{fmt.Sprintf("could not move %s to %s (%v); still using %s", legacy, dir, err, legacy)}
+	}
+	if err := os.Symlink(dir, legacy); err != nil {
+		return []string{fmt.Sprintf("moved %s to %s; no link left behind: %v", legacy, dir, err)}
+	}
+	return []string{fmt.Sprintf("moved %s to %s (linked from the old path)", legacy, dir)}
 }
 
 func loadConfig() (Config, error) {
@@ -97,7 +160,7 @@ func loadConfig() (Config, error) {
 	return cfg, nil
 }
 
-var errNoRepo = errors.New("set repo in " + filepath.Join(configDir(), "config.toml") + ", or run `shepherd configure --repo <path>`")
+var errNoRepo = errors.New("set repo in " + filepath.Join(configDir(), "config.toml") + ", or run `kelpie configure --repo <path>`")
 
 func expandHome(p string) string {
 	if rest, ok := strings.CutPrefix(p, "~/"); ok {
@@ -130,7 +193,7 @@ func (c Config) repoFor(b Bead) string {
 	return c.Repo
 }
 
-// allRepos is every repository shepherd follows, for passes that are not about
+// allRepos is every repository kelpie follows, for passes that are not about
 // one bead (PR listing, worktree sweeps).
 func (c Config) allRepos() []string {
 	repos := []string{filepath.Clean(c.Repo)}

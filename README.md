@@ -1,4 +1,4 @@
-# shepherd
+# kelpie
 
 Run many coding agents in parallel from one conversation.
 
@@ -22,7 +22,7 @@ state shows in Herdr's sidebar.
 - **Worktrees and workers are handled for you.** One bead gets one branch, one
   worktree and one agent named after the bead. Starting a thread is one key;
   cleaning up after a merge is one command.
-- **Beads is the only state.** No task file or database of shepherd's own:
+- **Beads is the only state.** No task file or database of kelpie's own:
   statuses, notes and memories live in `bd`, which many agents can update at
   once. That's what lets you run many threads without them stepping on each
   other, and what lets any session, including the coordinator after a restart,
@@ -36,31 +36,31 @@ state shows in Herdr's sidebar.
 |---|---|---|
 | **Beads** (`bd`) | The issue tracker in your repo | All task state: status, notes, questions, lessons. The only record. |
 | **Herdr** | The terminal the agents run in | Panes, agent names and states, worktrees, the sidebar, notifications |
-| **Coordinator** | One agent named `shepherd`, in `~/.local/state/shepherd/coordinator` | Talking to you, planning, creating beads, dispatching. Never does the work. |
+| **Coordinator** | One agent named `kelpie`, in `~/.local/state/kelpie/coordinator` | Talking to you, planning, creating beads, dispatching. Never does the work. |
 | **Workers** | One agent per bead, named after the bead, in the bead's worktree | Doing the work and keeping their bead current |
-| **Ticker** | A background loop (`shepherd ticker`), started with the plugin | Watching threads, following PRs and runs, prompting workers, the inbox, the sidebar |
+| **Ticker** | A background loop (`kelpie ticker`), started with the plugin | Watching threads, following PRs and runs, prompting workers, the inbox, the sidebar |
 
 The coordinator and the ticker never talk to each other directly. The ticker
-writes events to an **inbox** (files in `~/.local/state/shepherd/inbox/`) and
+writes events to an **inbox** (files in `~/.local/state/kelpie/inbox/`) and
 nudges the coordinator; the coordinator reads the inbox through
-`shepherd context`. Everything a worker wants to say goes into its bead.
+`kelpie context`. Everything a worker wants to say goes into its bead.
 
 ### The loop
 
 ```
-  you ──── talk ────▶ coordinator ──── shepherd dispatch ────▶ worker (own worktree)
+  you ──── talk ────▶ coordinator ──── kelpie dispatch ────▶ worker (own worktree)
    ▲                    ▲     │                                  │  ▲
-   │                    │     └── shepherd context ◀─┐           │  │ prompts, once idle 60s
+   │                    │     └── kelpie context ◀─┐           │  │ prompts, once idle 60s
    │ notifications      │ nudge                      │ inbox     │  │ (checks, reviews, merge, runs)
    │ + sidebar          │                            │           ▼  │
    └──────────────────── ticker ─────────────────────┴──── reads bd, herdr, gh
                          every 15s (PRs and runs every 60s)
 ```
 
-1. **You ask the coordinator for something.** It runs `shepherd context`,
+1. **You ask the coordinator for something.** It runs `kelpie context`,
    creates beads for the work (`bd create`, with parents and dependencies), and
    proposes threads. It waits for your go-ahead.
-2. **The coordinator dispatches.** `shepherd dispatch <bead>` claims the bead,
+2. **The coordinator dispatches.** `kelpie dispatch <bead>` claims the bead,
    creates a worktree on `<branch_prefix><bead>-<slug>`, starts Claude or Codex
    named after the bead, and sends the **brief**: the bead id and title, the
    worktree and branch, the Linear key if there is one, how to report, and
@@ -91,14 +91,14 @@ nudges the coordinator; the coordinator reads the inbox through
      notifies you.
    - **The coordinator:** when there are new events and the coordinator has
      been idle for `idle_seconds`, the ticker nudges it to run
-     `shepherd context`.
+     `kelpie context`.
 6. **The coordinator catches up.** It reads the inbox and threads, relays
    questions and `RUN:` commands to you, passes your answers to the worker
    (`herdr agent prompt`), and marks the items handled with
-   `shepherd inbox done`.
+   `kelpie inbox done`.
 7. **The thread finishes.** After the merge the worker verifies and closes its
    bead with a reason. The ticker sees it leave the active set and writes a
-   `closed` event, and the coordinator runs `shepherd resolve` to remove the
+   `closed` event, and the coordinator runs `kelpie resolve` to remove the
    worktree.
 
 ### Finishing a thread
@@ -107,7 +107,7 @@ Usually there's nothing to do. When a worker's PR merges, the ticker tells it
 to verify and close its bead (`bd close <id> --reason "<what shipped and how
 it was verified>"`). A `rolling-out` bead is finished first, then closed. The
 ticker sees the bead close and writes a `closed` event, and the coordinator
-runs `shepherd resolve <bead>`: that removes the bead's worktree and its
+runs `kelpie resolve <bead>`: that removes the bead's worktree and its
 workspace, closing the worker's pane, and deletes the local branch if the PR
 merged. With `auto_resolve = true` the ticker resolves on its own once the PR
 has merged, the bead is closed and the agent is idle.
@@ -116,11 +116,11 @@ By hand:
 
 | Situation | Do this |
 |---|---|
-| Done without a PR (an investigation, an ops task) | `bd close <id> --reason "…"`, then `shepherd resolve <id>` |
-| Dropping the work | `bd close <id> --reason "dropped: …"`, or `bd update <id> --status deferred` to park it; then `shepherd resolve <id> --force` if nothing in the worktree is worth keeping |
+| Done without a PR (an investigation, an ops task) | `bd close <id> --reason "…"`, then `kelpie resolve <id>` |
+| Dropping the work | `bd close <id> --reason "dropped: …"`, or `bd update <id> --status deferred` to park it; then `kelpie resolve <id> --force` if nothing in the worktree is worth keeping |
 | Done, but you want the worktree a while longer | Close the bead and resolve it later |
-| Finished worktrees have piled up | `shepherd sweep`, then `shepherd sweep --yes` to remove the safe ones |
-| Claims nobody is going to finish | `shepherd stale`, then `shepherd stale --release` to reopen them |
+| Finished worktrees have piled up | `kelpie sweep`, then `kelpie sweep --yes` to remove the safe ones |
+| Claims nobody is going to finish | `kelpie stale`, then `kelpie stale --release` to reopen them |
 
 `resolve` refuses while the bead is still open or its agent is working, unless
 you pass `--force`, and it only ever removes a linked worktree on that bead's
@@ -131,9 +131,9 @@ When you close something, also:
 
 - save anything the next worker should know with `bd remember "…"`; every new
   session loads it at start-up;
-- mark its inbox items handled (`shepherd inbox done <bead>`) if you dealt
+- mark its inbox items handled (`kelpie inbox done <bead>`) if you dealt
   with it without the coordinator;
-- move its Linear issue to Done (`shepherd context` lists the moves due).
+- move its Linear issue to Done (`kelpie context` lists the moves due).
 
 ### Messages
 
@@ -141,10 +141,10 @@ Every automated message says it isn't from you, and none approves anything.
 
 | From → to | When | Starts with |
 |---|---|---|
-| dispatch → worker | Once, at start | `You are the shepherd worker for bead …` |
-| ticker → worker | Checks fail, review feedback, merge, run finished | `[shepherd: automated, not the user] PR #N …` |
-| resume → worker | After `shepherd resume` | `[shepherd] You were resumed after your agent exited.` |
-| ticker → coordinator | New inbox items and the coordinator is idle | `[shepherd ticker: automated, not the user, approves nothing] N new inbox item(s).` |
+| dispatch → worker | Once, at start | `You are the kelpie worker for bead …` |
+| ticker → worker | Checks fail, review feedback, merge, run finished | `[kelpie: automated, not the user] PR #N …` |
+| resume → worker | After `kelpie resume` | `[kelpie] You were resumed after your agent exited.` |
+| ticker → coordinator | New inbox items and the coordinator is idle | `[kelpie ticker: automated, not the user, approves nothing] N new inbox item(s).` |
 | worker → everyone | Any time | A note on its bead (`bd note`), or a status change |
 | coordinator → worker | Relaying your answer | Whatever it writes with `herdr agent prompt` |
 
@@ -154,7 +154,7 @@ Inbox event kinds: `needs_you`, `checks_failing`, `new_review`, `merged`,
 
 ### Features in detail
 
-- **Names.** Shepherd ties a worker to its bead by name: the bead id with
+- **Names.** Kelpie ties a worker to its bead by name: the bead id with
   dots as dashes (`backend-ab12.3` → `backend-ab12-3`). Dispatch and resume
   set it. If something else renames a worker, the ticker renames it back once
   a minute, when it's the only agent in an active bead's worktree.
@@ -183,9 +183,9 @@ Inbox event kinds: `needs_you`, `checks_failing`, `new_review`, `merged`,
   merge prompt says to carry on rather than close.
 - **Bot reviews** (Codex, CodeRabbit and other GitHub Apps) are told apart from
   human ones. Both go to the worker; only a human review notifies you.
-- **Resume.** Herdr restarts don't relaunch agents. `shepherd resume` restarts
+- **Resume.** Herdr restarts don't relaunch agents. `kelpie resume` restarts
   each claimed bead's agent in its worktree with `claude --continue` or
-  `codex resume --last`, as whichever agent claimed it. `shepherd context`
+  `codex resume --last`, as whichever agent claimed it. `kelpie context`
   lists resumable threads, stale claims (in progress, no agent, worktree or
   PR, untouched 7 days) and other claims separately.
 - **Several repos.** Beads labelled `repo:<name>` work in that repo from
@@ -193,7 +193,7 @@ Inbox event kinds: `needs_you`, `checks_failing`, `new_review`, `merged`,
   configured.
 - **Linear.** The bead's issue key comes from its title, or from a `Linear:`
   note (any note, if `linear_prefixes` is set). It goes in the brief and at
-  the end of the sidebar row. `shepherd context` lists where each issue should
+  the end of the sidebar row. `kelpie context` lists where each issue should
   be (In Review while its PR is open, Done once merged) and flags PR titles
   missing the key.
 - **Choosing the agent.** `worker_agent = "auto"` picks Codex only when both
@@ -203,32 +203,32 @@ Inbox event kinds: `needs_you`, `checks_failing`, `new_review`, `merged`,
   that git reports prunable. `--yes` removes only the ones that are clean,
   fully pushed, have no agent in them and whose bead isn't still active. It
   deletes a local branch only when its PR merged.
-- **Reporting.** `shepherd report` prints beads closed in the window with
+- **Reporting.** `kelpie report` prints beads closed in the window with
   their close reasons and PRs, your PRs merged without a bead, open PRs in
   flight, and `needs_me` beads with their latest note.
-- **The sidebar sort** is a Herdr agent view owned by `plugin:shepherd`: the
+- **The sidebar sort** is a Herdr agent view owned by `plugin:kelpie`: the
   coordinator first, with a row summarising what it has to deal with
   (`coordinator · 2 need you · 1 review · 3 inbox`), then threads by state
   (needs you first), then agents that aren't on a bead. Herdr drops the view
   when the plugin is unlinked, uninstalled or disabled.
 
-State lives in `~/.local/state/shepherd/`: `state.json` (the ticker's memory
+State lives in `~/.local/state/kelpie/`: `state.json` (the ticker's memory
 of each thread), `inbox/` and `inbox/done/` (events), `outbox/` (briefs
 waiting for an agent), `coordinator/` (its folder) and `ticker.log`.
 
-## A day with shepherd
+## A day with kelpie
 
 What this looks like on a real working day for someone who owns a service and
 its infrastructure. Bead ids, PR numbers and names are made up.
 
 **9:00: catching up.** You open the coordinator and ask where things stand. It
-runs `shepherd context`, which starts like this (trimmed):
+runs `kelpie context`, which starts like this (trimmed):
 
 ```
 1 needs you · 1 checks failing · 2 idle
 
-## Inbox (unhandled; `shepherd inbox done [bead...]` when dealt with)
-- 02:14 app-8zk4 [closed] app-8zk4 closed after PR #402 merged; run `shepherd resolve app-8zk4` to remove its worktree
+## Inbox (unhandled; `kelpie inbox done [bead...]` when dealt with)
+- 02:14 app-8zk4 [closed] app-8zk4 closed after PR #402 merged; run `kelpie resolve app-8zk4` to remove its worktree
 - 04:40 app-c71m [checks_failing] PR #405 checks failing: integration-tests
 
 ## Threads (bead · state · agent)
@@ -243,7 +243,7 @@ merged, and its worker verified the change and closed its bead. You answer the
 one question: "One region first, then the rest after an hour of clean
 metrics." The coordinator passes that to the worker, which resets its bead to
 `in_progress` and carries on. Then the coordinator runs
-`shepherd resolve app-8zk4`, which removes the merged thread's worktree and
+`kelpie resolve app-8zk4`, which removes the merged thread's worktree and
 branch.
 
 **9:20: new work from yesterday's incident.** You paste your incident notes: a
@@ -283,7 +283,7 @@ were doing.
 
 **13:00: one-offs.** A colleague posts a bead id in chat: an intermittent test
 failure that needs a look. You copy it and press your focus-clipboard key
-(`shepherd.focus-clipboard`), and a worker starts on it without going through
+(`kelpie.focus-clipboard`), and a worker starts on it without going through
 the coordinator. Anything with a bead can
 be started from the clipboard or from the board (`prefix+j`, then `c` for
 Claude or `x` for Codex).
@@ -302,7 +302,7 @@ so every future worker that runs `bd prime` at start-up sees it.
 
 Nothing about the day lived in your head or a scratch file: every thread's
 state, question, PR and lesson is in beads, and the next morning starts with
-the same `shepherd context`.
+the same `kelpie context`.
 
 The board (`prefix+j`) lists threads by state plus the beads you've marked
 `next` and other ready beads: `↵` focus or start, `c`/`x` start with Claude or
@@ -316,11 +316,11 @@ above, which then act on the filtered rows, and `esc` clears it.
 
 Once it's installed (see below), the first ten minutes:
 
-1. **Install and configure it** (below). `configure` points shepherd at your
+1. **Install and configure it** (below). `configure` points kelpie at your
    repo. Beads should already be set up there (`bd init`) with the `needs_me`
    status added.
 2. **Open the coordinator** with `prefix+shift+j`. It starts in a folder of its
-   own, reads `shepherd context` and gives you a status. The first time, Claude
+   own, reads `kelpie context` and gives you a status. The first time, Claude
    asks whether to trust that folder; say yes.
 3. **Give it something small.** "Add a `--json` flag to the `export` command."
    It creates a bead, proposes one thread and waits.
@@ -341,24 +341,44 @@ to build from source.
 ## Install
 
 ```sh
-herdr plugin install travisjeffery/herdr-shepherd --ref v0.2.0
+herdr plugin install travisjeffery/herdr-kelpie --ref v0.3.0
 ```
 
 Herdr downloads the prebuilt binary for your machine and checks it against the
 release's checksums. Then, from a workspace in the repository you want
-shepherd to work in:
+kelpie to work in:
 
 ```sh
-herdr plugin action invoke configure --plugin shepherd
+herdr plugin action invoke configure --plugin kelpie
 ```
 
-`configure` writes `~/.config/shepherd/config.toml` with that repository (or
-pass `--repo <path>` when running `shepherd configure` directly), links
-`~/.local/bin/shepherd`, and sets up the sidebar sort. It's safe to run again
+`configure` writes `~/.config/kelpie/config.toml` with that repository (or
+pass `--repo <path>` when running `kelpie configure` directly), links
+`~/.local/bin/kelpie`, and sets up the sidebar sort. It's safe to run again
 and never rewrites an existing config.
 
-To build from source instead: clone the repo, run `go build -o bin/shepherd .`,
-then `herdr plugin link "$PWD"` and `bin/shepherd configure --repo <path>`.
+To build from source instead: clone the repo, run `go build -o bin/kelpie .`,
+then `herdr plugin link "$PWD"` and `bin/kelpie configure --repo <path>`.
+
+The name `kelpie` is only this tool's binary and Herdr plugin id: it is not
+published to crates.io or npm, where unrelated `kelpie` packages already exist.
+
+### Upgrading from shepherd
+
+kelpie was called shepherd. The first kelpie command moves
+`~/.config/shepherd` to `~/.config/kelpie` and `~/.local/state/shepherd` to
+`~/.local/state/kelpie`, leaving a link at each old path, so the inbox, state
+and coordinator folder carry over and an older running ticker keeps working.
+If the new directory already exists it is used and the old one is left alone.
+`SHEPHERD_CONFIG_DIR` and `SHEPHERD_STATE_DIR` are still read when the
+`KELPIE_` ones are unset.
+
+`shepherd` still works as a deprecated alias: `bin/shepherd` links to
+`bin/kelpie`, `configure` repoints an existing `~/.local/bin/shepherd` link,
+and running it prints a one-line notice. A coordinator agent still named
+`shepherd` is renamed `kelpie` by the ticker. Herdr plugin ids changed too, so
+unlink the old plugin, link or install this one, and rename `shepherd.*` keys
+in `~/.config/herdr/config.toml` to `kelpie.*`.
 
 Add the sidebar row and keys to `~/.config/herdr/config.toml`:
 
@@ -374,20 +394,20 @@ rows = [["state_icon", "machine", "workspace", "tab"], ["agent"],
 [[keys.command]]
 key = "prefix+j"
 type = "plugin_action"
-command = "shepherd.board"
+command = "kelpie.board"
 
 [[keys.command]]
 key = "prefix+shift+j"
 type = "plugin_action"
-command = "shepherd.coordinator"
+command = "kelpie.coordinator"
 ```
 
-`shepherd.focus-clipboard` (Claude) and `shepherd.focus-clipboard-codex` focus
+`kelpie.focus-clipboard` (Claude) and `kelpie.focus-clipboard-codex` focus
 or start the bead whose id is on the clipboard, if you want keys for those too.
 
 ## Configuration
 
-`~/.config/shepherd/config.toml`; only `repo` is required:
+`~/.config/kelpie/config.toml`; only `repo` is required:
 
 ```toml
 repo = "~/src/myproject"
@@ -409,35 +429,35 @@ not the server that happened to start it: every herdr server that loads the
 plugin runs its startup, and a ticker on a server without the coordinator
 sees no agents. If the coordinator runs in a named session, set it to that
 session's socket (`~/.config/herdr/sessions/<name>/herdr.sock`).
-`shepherd ticker status` prints the socket the ticker follows, `shepherd
-context` warns when it isn't the coordinator's, and `shepherd ticker start`
+`kelpie ticker status` prints the socket the ticker follows, `kelpie
+context` warns when it isn't the coordinator's, and `kelpie ticker start`
 moves a ticker that is on the wrong one.
 
 `repo` is the default repository. A bead whose work is in another one carries
 the label `repo:<name>` for a name in `repos` (`bd label add <bead> repo:infra`);
 its worktree, branch and PRs then live in that repository, and
-`shepherd context` tags its thread `[infra]`. A `repo:` label naming no
+`kelpie context` tags its thread `[infra]`. A `repo:` label naming no
 configured repository falls back to `repo` and shows as a warning in
-`shepherd context`.
+`kelpie context`.
 
-`~/.config/shepherd/instructions.md` is added to every worker's brief.
+`~/.config/kelpie/instructions.md` is added to every worker's brief.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `shepherd coordinator [--agent K]` | Open (or focus) the coordinator agent. Also `prefix+shift+j`. |
-| `shepherd dispatch <bead> [--agent K] [--focus]` | Claim a bead, create its worktree and branch, start a worker and brief it. |
-| `shepherd focus [<bead>] [--agent K]` | Focus the bead's worker, or dispatch one. With no bead, reads the id from the clipboard. |
-| `shepherd context` | The coordinator's digest: inbox, threads by state, Linear moves, `next` and ready beads. |
-| `shepherd inbox done [<bead>...]` | Mark inbox items handled (all of them if no bead is given). |
-| `shepherd resume [<bead>...] [--agent K]` | Restart exited workers in their worktrees, continuing their last conversation. |
-| `shepherd stale [--days N] [--release]` | List claims with no agent, worktree or PR untouched N days (7); `--release` reopens them. |
-| `shepherd resolve <bead> [--force]` | Remove a finished bead's worktree, and its branch if the PR merged. |
-| `shepherd sweep [--yes]` | List finished worktrees across every repo; `--yes` removes only the safe ones. |
-| `shepherd report [--since 24h\|7d\|DATE]` | Markdown summary of what shipped, what's in flight and what needs you. |
-| `shepherd board` | The board popup (`prefix+j`). |
-| `shepherd ticker run\|start\|stop\|status`, `shepherd tick` | The background loop, or one pass of it in the foreground. `status` shows the herdr socket it follows. |
-| `shepherd configure` / `unconfigure` | Install, or remove, the agent view and sidebar tokens. |
+| `kelpie coordinator [--agent K]` | Open (or focus) the coordinator agent. Also `prefix+shift+j`. |
+| `kelpie dispatch <bead> [--agent K] [--focus]` | Claim a bead, create its worktree and branch, start a worker and brief it. |
+| `kelpie focus [<bead>] [--agent K]` | Focus the bead's worker, or dispatch one. With no bead, reads the id from the clipboard. |
+| `kelpie context` | The coordinator's digest: inbox, threads by state, Linear moves, `next` and ready beads. |
+| `kelpie inbox done [<bead>...]` | Mark inbox items handled (all of them if no bead is given). |
+| `kelpie resume [<bead>...] [--agent K]` | Restart exited workers in their worktrees, continuing their last conversation. |
+| `kelpie stale [--days N] [--release]` | List claims with no agent, worktree or PR untouched N days (7); `--release` reopens them. |
+| `kelpie resolve <bead> [--force]` | Remove a finished bead's worktree, and its branch if the PR merged. |
+| `kelpie sweep [--yes]` | List finished worktrees across every repo; `--yes` removes only the safe ones. |
+| `kelpie report [--since 24h\|7d\|DATE]` | Markdown summary of what shipped, what's in flight and what needs you. |
+| `kelpie board` | The board popup (`prefix+j`). |
+| `kelpie ticker run\|start\|stop\|status`, `kelpie tick` | The background loop, or one pass of it in the foreground. `status` shows the herdr socket it follows. |
+| `kelpie configure` / `unconfigure` | Install, or remove, the agent view and sidebar tokens. |
 
 `K` is `claude`, `codex` or `auto`.

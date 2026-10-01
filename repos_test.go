@@ -68,7 +68,7 @@ func TestRepoPRsMatchesOnlyTheBeadsRepo(t *testing.T) {
 }
 
 func TestContextTagsNonDefaultRepoAndWarnsOnUnknown(t *testing.T) {
-	t.Setenv("SHEPHERD_STATE_DIR", t.TempDir())
+	t.Setenv("KELPIE_STATE_DIR", t.TempDir())
 	threads := []Thread{
 		{Bead: labelled("b-1")},
 		{Bead: labelled("b-2", "repo:infra")},
@@ -92,7 +92,7 @@ func TestContextTagsNonDefaultRepoAndWarnsOnUnknown(t *testing.T) {
 
 func TestLoadConfigExpandsRepos(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("SHEPHERD_CONFIG_DIR", dir)
+	t.Setenv("KELPIE_CONFIG_DIR", dir)
 	t.Setenv("BEADS_DIR", dir)
 	t.Setenv("HOME", "/home/me")
 	toml := "repo = \"~/src/app\"\nrepos = { infra = \"~/src/infra\", model = \"/opt/model\" }\n"

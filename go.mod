@@ -1,4 +1,4 @@
-module github.com/travisjeffery/herdr-shepherd
+module github.com/travisjeffery/herdr-kelpie
 
 go 1.26.7
 

@@ -14,7 +14,7 @@ import (
 
 // source tags every sidebar token this tool writes, so clearing ours never
 // touches another plugin's.
-const source = "shepherd"
+const source = "kelpie"
 
 type Agent struct {
 	Name        string `json:"name"`
@@ -251,7 +251,9 @@ func (h Herdr) ReportState(pane string, tokens map[string]string, ttl time.Durat
 }
 
 func (h Herdr) ClearState(pane string) {
-	_, _ = h.call(callTimeout, "pane", "report-metadata", pane, "--source", source, "--clear-token", "sh_state", "--clear-token", "sh_rank")
+	for _, src := range []string{source, legacyName} {
+		_, _ = h.call(callTimeout, "pane", "report-metadata", pane, "--source", src, "--clear-token", "sh_state", "--clear-token", "sh_rank")
+	}
 }
 
 func (h Herdr) OpenPane(entrypoint string) error {

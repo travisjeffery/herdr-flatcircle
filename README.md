@@ -150,7 +150,10 @@ Every automated message says it isn't from you, and none approves anything.
 
 Inbox event kinds: `needs_you`, `checks_failing`, `new_review`,
 `ready_to_merge` (approved or needing no review, merge state CLEAN or
-UNSTABLE, no checks running; once per head commit), `merged`,
+UNSTABLE, no checks running, no unresolved review thread that a push hasn't
+outdated, and, when approved, an approval of the head commit within 7 days;
+once per head commit; otherwise the board shows
+`approved but blocked: 3 open threads, stale approval`), `merged`,
 `run_succeeded`, `run_failed`, `finished` (a worker finished a turn),
 `agent_gone` (its agent exited) and `closed`.
 

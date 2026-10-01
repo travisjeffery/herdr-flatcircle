@@ -139,6 +139,8 @@ func stateLine(t Thread) string {
 			s += " (" + strings.Join(t.Checks.Failing, ", ") + ")"
 		case t.PR.State == "OPEN" && t.PR.ReviewDecision == "CHANGES_REQUESTED":
 			s += " changes requested"
+		case mergeable(t.PR, t.Checks) && len(mergeBlockers(t.PR)) > 0:
+			s += " " + approval(t.PR) + " but blocked: " + strings.Join(mergeBlockers(t.PR), ", ")
 		case t.PR.State == "OPEN" && t.PR.ReviewDecision == "APPROVED":
 			s += " approved"
 		case t.PR.State == "OPEN" && t.Checks.Pending > 0:
@@ -289,7 +291,7 @@ func transition(t Thread, prev Snapshot, first bool, now time.Time) Outcome {
 			o.Notify = true
 			ev(EventReady, "PR #%d is ready to merge (%s)", t.PR.Number, approval(t.PR))
 			o.Prompts = append(o.Prompts, fmt.Sprintf(
-				readyPrompt+"%d is ready to merge at %s: %s and its required checks passed. Finish anything left before merge (the Linear issue, your report), then merge it with `gh pr merge %d --match-head-commit %s` only if you were told to merge; otherwise say it is ready to merge and stop. The ticker tells you when it merges.",
+				readyPrompt+"%d is ready to merge at %s: %s, no review thread is open, and its required checks passed. Finish anything left before merge (the Linear issue, your report), then merge it with `gh pr merge %d --match-head-commit %s` only if you were told to merge; otherwise say it is ready to merge and stop. The ticker tells you when it merges.",
 				t.PR.Number, t.PR.HeadSHA, approval(t.PR), t.PR.Number, t.PR.HeadSHA))
 		}
 	}

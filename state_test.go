@@ -453,7 +453,7 @@ func TestReadyToMergeOncePerHead(t *testing.T) {
 	if len(o.Events) != 1 || o.Events[0].Kind != EventReady || !o.Notify {
 		t.Fatalf("want one notifying ready_to_merge event, got %+v", o)
 	}
-	if len(o.Prompts) != 1 || !strings.Contains(o.Prompts[0], "PR #7 is ready to merge: approved") {
+	if len(o.Prompts) != 1 || !strings.Contains(o.Prompts[0], "PR #7 is ready to merge at aaa: approved") || !strings.Contains(o.Prompts[0], "--match-head-commit aaa") {
 		t.Fatalf("want a ready prompt, got %+v", o.Prompts)
 	}
 	prev = snapshot(th, prev, t0)
@@ -479,7 +479,35 @@ func TestReadyToMergeFirstSightIsBaseline(t *testing.T) {
 	if o := transition(th, Snapshot{}, true, t0); len(o.Events) != 0 {
 		t.Fatalf("first sight produced %+v", o)
 	}
-	if s := snapshot(th, Snapshot{}, t0); s.ReadySHA != "aaa" {
-		t.Fatalf("baseline ReadySHA = %q", s.ReadySHA)
+	if s := snapshot(th, Snapshot{}, t0); s.ReadyKey != "7@aaa" {
+		t.Fatalf("baseline ReadyKey = %q", s.ReadyKey)
+	}
+}
+
+func TestReadyToMergeReplacementPRSameHead(t *testing.T) {
+	prev := snapshot(thread(bead(StatusInProgress), agent("idle", 1), readyPR()), Snapshot{}, t0)
+	pr := readyPR()
+	pr.Number = 8
+	if o := transition(thread(bead(StatusInProgress), agent("idle", 1), pr), prev, false, t0.Add(time.Minute)); len(o.Events) != 1 || o.Events[0].Kind != EventReady {
+		t.Fatalf("a replacement PR on the same head should announce: %+v", o)
+	}
+}
+
+func TestQueuedReadyPromptDroppedWhenHeadMoves(t *testing.T) {
+	th := thread(bead(StatusInProgress), agent("working", 1), readyPR())
+	prev := Snapshot{Group: GroupWorking, AgentStatus: "working", PRNumber: 7, PRState: "OPEN", ReviewsSplit: true}
+	o := transition(th, prev, false, t0)
+	prev = snapshot(th, prev, t0)
+	prev.Pending = append(prev.Pending, o.Prompts...)
+	if s := snapshot(th, prev, t0.Add(time.Minute)); len(s.Pending) != 1 {
+		t.Fatalf("a still-ready head should keep its prompt: %+v", s.Pending)
+	}
+	pushed := readyPR()
+	pushed.HeadSHA, pushed.MergeState = "bbb", "BLOCKED"
+	pushed.Checks = append(pushed.Checks, Check{Name: "e2e", Status: "IN_PROGRESS"})
+	prev.Pending = append(prev.Pending, "other prompt")
+	s := snapshot(thread(bead(StatusInProgress), agent("working", 1), pushed), prev, t0.Add(2*time.Minute))
+	if !slices.Equal(s.Pending, []string{"other prompt"}) {
+		t.Fatalf("stale ready prompt kept: %+v", s.Pending)
 	}
 }

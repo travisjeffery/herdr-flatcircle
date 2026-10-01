@@ -173,9 +173,9 @@ type Snapshot struct {
 	Pending      []string          `json:"pending_prompts"`
 	// NeedsMe is the bead's needs_me status at this snapshot.
 	NeedsMe bool `json:"needs_me"`
-	// ReadySHA is the last head commit the PR was seen ready to merge at, so
-	// ready_to_merge fires once per push.
-	ReadySHA string `json:"ready_sha,omitempty"`
+	// ReadyKey is the PR and head commit last seen ready to merge (readyKey),
+	// so ready_to_merge fires once per push and again for a replacement PR.
+	ReadyKey string `json:"ready_key,omitempty"`
 }
 
 type EventKind string
@@ -216,7 +216,7 @@ type Outcome struct {
 const resumeNote = "auto: agent resumed after needs_me"
 
 func snapshot(t Thread, prev Snapshot, now time.Time) Snapshot {
-	s := Snapshot{Group: classify(t), Reviews: t.Reviews, BotReviews: len(t.BotReviews), ReviewsSplit: true, Runs: runStates(t.Runs), Failing: t.Checks.Failing, Pending: prev.Pending, NeedsMe: t.Bead.Status == StatusNeedsMe, ReadySHA: prev.ReadySHA}
+	s := Snapshot{Group: classify(t), Reviews: t.Reviews, BotReviews: len(t.BotReviews), ReviewsSplit: true, Runs: runStates(t.Runs), Failing: t.Checks.Failing, Pending: freshPending(t, prev.Pending), NeedsMe: t.Bead.Status == StatusNeedsMe, ReadyKey: prev.ReadyKey}
 	if t.Agent != nil {
 		s.AgentStatus, s.AgentSeq = t.Agent.Status, t.Agent.Seq
 		switch {
@@ -229,8 +229,8 @@ func snapshot(t Thread, prev Snapshot, now time.Time) Snapshot {
 	}
 	if t.PR != nil {
 		s.PRNumber, s.PRState = t.PR.Number, t.PR.State
-		if readyToMerge(t.PR, t.Checks) {
-			s.ReadySHA = t.PR.HeadSHA
+		if k := readyKey(t); k != "" {
+			s.ReadyKey = k
 		}
 	}
 	return s
@@ -285,12 +285,12 @@ func transition(t Thread, prev Snapshot, first bool, now time.Time) Outcome {
 		if len(t.BotReviews) > prev.BotReviews && comparable {
 			review("a new review from " + strings.Join(slices.Compact(slices.Sorted(slices.Values(t.BotReviews[prev.BotReviews:]))), ", "))
 		}
-		if readyToMerge(t.PR, t.Checks) && t.PR.HeadSHA != prev.ReadySHA {
+		if k := readyKey(t); k != "" && k != prev.ReadyKey {
 			o.Notify = true
 			ev(EventReady, "PR #%d is ready to merge (%s)", t.PR.Number, approval(t.PR))
 			o.Prompts = append(o.Prompts, fmt.Sprintf(
-				"[kelpie: automated, not the user] PR #%d is ready to merge: %s and its required checks passed. Finish anything left before merge (the Linear issue, your report), then merge it with `gh pr merge %d` only if you were told to merge; otherwise say it is ready to merge and stop. The ticker tells you when it merges.",
-				t.PR.Number, approval(t.PR), t.PR.Number))
+				readyPrompt+"%d is ready to merge at %s: %s and its required checks passed. Finish anything left before merge (the Linear issue, your report), then merge it with `gh pr merge %d --match-head-commit %s` only if you were told to merge; otherwise say it is ready to merge and stop. The ticker tells you when it merges.",
+				t.PR.Number, t.PR.HeadSHA, approval(t.PR), t.PR.Number, t.PR.HeadSHA))
 		}
 	}
 	if t.PR != nil && t.PR.State == "MERGED" && prev.PRState != "MERGED" {
@@ -330,6 +330,34 @@ func transition(t Thread, prev Snapshot, first bool, now time.Time) Outcome {
 		ev(EventAgentGone, "%s's agent exited while the bead is still %s", id, t.Bead.Status)
 	}
 	return o
+}
+
+const readyPrompt = "[kelpie: automated, not the user] PR #"
+
+// readyKey names the PR and head commit a thread is ready to merge at, or ""
+// when it isn't ready.
+func readyKey(t Thread) string {
+	if !readyToMerge(t.PR, t.Checks) {
+		return ""
+	}
+	return fmt.Sprintf("%d@%s", t.PR.Number, t.PR.HeadSHA)
+}
+
+// freshPending drops a queued ready-to-merge prompt once its PR and head are
+// no longer the ones ready to merge: a push or a new review since it was
+// queued must not reach the worker as a go-ahead.
+func freshPending(t Thread, pending []string) []string {
+	var keep []string
+	for _, p := range pending {
+		if rest, ok := strings.CutPrefix(p, readyPrompt); ok && strings.Contains(rest, " is ready to merge at ") {
+			k := readyKey(t)
+			if k == "" || !strings.HasPrefix(rest, strings.Replace(k, "@", " is ready to merge at ", 1)+":") {
+				continue
+			}
+		}
+		keep = append(keep, p)
+	}
+	return keep
 }
 
 func approval(pr *PR) string {

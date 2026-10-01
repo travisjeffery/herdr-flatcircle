@@ -190,8 +190,9 @@ func (t Ticker) refreshPRs(st *TickerState, active []Bead) {
 }
 
 // gatePRs fetches, in one query, the merge gate of every PR that is otherwise
-// mergeable. When the query fails a PR keeps the gate it had at the same
-// head; without one it is not ready to merge.
+// mergeable. When the query fails a PR keeps the threads it had at the same
+// head, its approvals still aged against now; without a gate it is not ready
+// to merge.
 func (t Ticker) gatePRs(old, prs map[string]PR) {
 	var want []PR
 	for _, pr := range prs {
@@ -202,15 +203,22 @@ func (t Ticker) gatePRs(old, prs map[string]PR) {
 	if len(want) == 0 {
 		return
 	}
-	gates, err := t.gh.Gates(want, time.Now())
+	now := time.Now()
+	gates, err := t.gh.Gates(want, now)
 	if err != nil {
 		t.log.Printf("gh merge gates: %v", err)
 	}
+	applyGates(old, prs, gates, err != nil, now)
+}
+
+func applyGates(old, prs map[string]PR, gates map[string]MergeGate, failed bool, now time.Time) {
 	for id, pr := range prs {
 		if g, ok := gates[pr.URL]; ok {
 			pr.Gate = &g
-		} else if err != nil && old[id].Gate != nil && old[id].Gate.Head == pr.HeadSHA {
-			pr.Gate = old[id].Gate
+		} else if failed && old[id].Gate != nil && old[id].Gate.Head == pr.HeadSHA {
+			g := *old[id].Gate
+			g.At = now
+			pr.Gate = &g
 		} else {
 			pr.Gate = nil
 		}

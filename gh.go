@@ -35,9 +35,13 @@ type PR struct {
 type MergeGate struct {
 	Head string `json:"head"`
 	// OpenThreads counts unresolved review threads not outdated by a push.
-	OpenThreads     int       `json:"open_threads"`
-	HeadCommittedAt time.Time `json:"head_committed_at"`
-	CheckedAt       time.Time `json:"checked_at"`
+	OpenThreads int `json:"open_threads"`
+	// MoreThreads marks a PR with threads past the first page, which were not
+	// counted.
+	MoreThreads bool `json:"more_threads,omitempty"`
+	// At is the ticker pass that last applied the gate, which approvals are
+	// aged against.
+	At time.Time `json:"at"`
 }
 
 // approvalMaxAge is how old the approval of a head may be and still let it
@@ -58,6 +62,9 @@ type Review struct {
 	} `json:"author"`
 	State       string    `json:"state"`
 	SubmittedAt time.Time `json:"submittedAt"`
+	Commit      struct {
+		OID string `json:"oid"`
+	} `json:"commit"`
 	// Bot is set from the REST API: gh pr view drops the [bot] suffix.
 	Bot bool `json:"bot,omitempty"`
 }
@@ -135,8 +142,8 @@ func mergeable(pr *PR, c Checks) bool {
 }
 
 // mergeBlockers is what keeps a mergeable PR from being ready: review threads
-// still open, or no approval since the head was committed and within
-// approvalMaxAge. A repo that requires no review needs no approval.
+// still open or uncounted, or no approval of the head within approvalMaxAge.
+// A repo that requires no review needs no approval.
 func mergeBlockers(pr *PR) []string {
 	g := pr.Gate
 	if g == nil {
@@ -146,6 +153,9 @@ func mergeBlockers(pr *PR) []string {
 	if g.OpenThreads > 0 {
 		out = append(out, fmt.Sprintf("%d open %s", g.OpenThreads, plural(g.OpenThreads, "thread")))
 	}
+	if g.MoreThreads {
+		out = append(out, "over 100 threads")
+	}
 	if pr.ReviewDecision == "APPROVED" && !freshApproval(pr.Reviews, g) {
 		out = append(out, "stale approval")
 	}
@@ -154,7 +164,7 @@ func mergeBlockers(pr *PR) []string {
 
 func freshApproval(reviews []Review, g *MergeGate) bool {
 	for _, r := range reviews {
-		if r.State == "APPROVED" && !r.SubmittedAt.Before(g.HeadCommittedAt) && g.CheckedAt.Sub(r.SubmittedAt) <= approvalMaxAge {
+		if r.State == "APPROVED" && r.Commit.OID == g.Head && g.At.Sub(r.SubmittedAt) <= approvalMaxAge {
 			return true
 		}
 	}
@@ -271,7 +281,7 @@ func (g GH) Gates(prs []PR, now time.Time) (map[string]MergeGate, error) {
 		owner, name, _ := strings.Cut(m[1], "/")
 		a := fmt.Sprintf("p%d", i)
 		alias[a] = pr.URL
-		fmt.Fprintf(&q, `%s: repository(owner: %q, name: %q) { pullRequest(number: %s) { headRefOid commits(last: 1) { nodes { commit { committedDate } } } reviewThreads(first: 100) { nodes { isResolved isOutdated } } } } `, a, owner, name, m[2])
+		fmt.Fprintf(&q, `%s: repository(owner: %q, name: %q) { pullRequest(number: %s) { headRefOid reviewThreads(first: 100) { pageInfo { hasNextPage } nodes { isResolved isOutdated } } } } `, a, owner, name, m[2])
 	}
 	if len(alias) == 0 {
 		return nil, nil
@@ -287,15 +297,11 @@ func parseGates(out []byte, alias map[string]string, now time.Time) (map[string]
 	var resp struct {
 		Data map[string]*struct {
 			PullRequest *struct {
-				HeadRefOid string `json:"headRefOid"`
-				Commits    struct {
-					Nodes []struct {
-						Commit struct {
-							CommittedDate time.Time `json:"committedDate"`
-						} `json:"commit"`
-					} `json:"nodes"`
-				} `json:"commits"`
+				HeadRefOid    string `json:"headRefOid"`
 				ReviewThreads struct {
+					PageInfo struct {
+						HasNextPage bool `json:"hasNextPage"`
+					} `json:"pageInfo"`
 					Nodes []struct {
 						IsResolved bool `json:"isResolved"`
 						IsOutdated bool `json:"isOutdated"`
@@ -310,11 +316,11 @@ func parseGates(out []byte, alias map[string]string, now time.Time) (map[string]
 	gates := map[string]MergeGate{}
 	for a, url := range alias {
 		r := resp.Data[a]
-		if r == nil || r.PullRequest == nil || len(r.PullRequest.Commits.Nodes) == 0 {
+		if r == nil || r.PullRequest == nil {
 			continue
 		}
 		pr := r.PullRequest
-		gate := MergeGate{Head: pr.HeadRefOid, HeadCommittedAt: pr.Commits.Nodes[0].Commit.CommittedDate, CheckedAt: now}
+		gate := MergeGate{Head: pr.HeadRefOid, MoreThreads: pr.ReviewThreads.PageInfo.HasNextPage, At: now}
 		for _, t := range pr.ReviewThreads.Nodes {
 			if !t.IsResolved && !t.IsOutdated {
 				gate.OpenThreads++

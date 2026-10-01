@@ -46,7 +46,7 @@ func groupColor(g Group) string {
 		return ansiRed
 	case GroupReview, GroupMerged, GroupRollingOut:
 		return ansiYellow
-	case GroupWorking:
+	case GroupWorking, GroupReady:
 		return ansiGreen
 	default:
 		return ansiDim

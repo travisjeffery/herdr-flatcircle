@@ -82,13 +82,13 @@ nudges the coordinator; the coordinator reads the inbox through
    - **The sidebar:** each worker's row gets its state line, like
      `review · PR #411 approved · ENG-1024`, and the agent view sorts what
      needs you to the top.
-   - **The worker:** failing checks, new review feedback, a merge or a finished
-     run become a prompt to that worker. Prompts wait until the worker has
+   - **The worker:** failing checks, new review feedback, a PR ready to merge,
+     a merge or a finished run become a prompt to that worker. Prompts wait until the worker has
      been idle for `idle_seconds`, so they never land in the middle of
      something, and several are sent together.
    - **The inbox:** each change is also an event file for the coordinator.
-   - **You:** entering needs-you, a merge, a failed run or a human review
-     notifies you.
+   - **You:** entering needs-you, a PR ready to merge, a merge, a failed run
+     or a human review notifies you.
    - **The coordinator:** when there are new events and the coordinator has
      been idle for `idle_seconds`, the ticker nudges it to run
      `kelpie context`.
@@ -142,13 +142,15 @@ Every automated message says it isn't from you, and none approves anything.
 | From → to | When | Starts with |
 |---|---|---|
 | dispatch → worker | Once, at start | `You are the kelpie worker for bead …` |
-| ticker → worker | Checks fail, review feedback, merge, run finished | `[kelpie: automated, not the user] PR #N …` |
+| ticker → worker | Checks fail, review feedback, ready to merge, merge, run finished | `[kelpie: automated, not the user] PR #N …` |
 | resume → worker | After `kelpie resume` | `[kelpie] You were resumed after your agent exited.` |
 | ticker → coordinator | New inbox items and the coordinator is idle | `[kelpie ticker: automated, not the user, approves nothing] N new inbox item(s).` |
 | worker → everyone | Any time | A note on its bead (`bd note`), or a status change |
 | coordinator → worker | Relaying your answer | Whatever it writes with `herdr agent prompt` |
 
-Inbox event kinds: `needs_you`, `checks_failing`, `new_review`, `merged`,
+Inbox event kinds: `needs_you`, `checks_failing`, `new_review`,
+`ready_to_merge` (approved or needing no review, merge state CLEAN or
+UNSTABLE, no checks running; once per head commit), `merged`,
 `run_succeeded`, `run_failed`, `finished` (a worker finished a turn),
 `agent_gone` (its agent exited) and `closed`.
 

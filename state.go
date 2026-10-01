@@ -14,6 +14,7 @@ type Group int
 const (
 	GroupNeedsYou Group = iota
 	GroupMerged
+	GroupReady
 	GroupReview
 	GroupRollingOut
 	GroupFailing
@@ -26,6 +27,7 @@ const (
 var groupNames = map[Group]string{
 	GroupNeedsYou:   "needs you",
 	GroupMerged:     "merged",
+	GroupReady:      "ready to merge",
 	GroupReview:     "review",
 	GroupRollingOut: "rolling out",
 	GroupFailing:    "checks failing",
@@ -71,6 +73,8 @@ func classify(t Thread) Group {
 		return GroupRollingOut
 	case t.PR != nil && t.PR.State == "MERGED":
 		return GroupMerged
+	case readyToMerge(t.PR, t.Checks):
+		return GroupReady
 	case t.PR != nil && t.PR.State == "OPEN" && len(t.Checks.Failing) > 0:
 		return GroupFailing
 	case t.Agent != nil && t.Agent.Status == "working":
@@ -169,6 +173,9 @@ type Snapshot struct {
 	Pending      []string          `json:"pending_prompts"`
 	// NeedsMe is the bead's needs_me status at this snapshot.
 	NeedsMe bool `json:"needs_me"`
+	// ReadyKey is the PR and head commit last seen ready to merge (readyKey),
+	// so ready_to_merge fires once per push and again for a replacement PR.
+	ReadyKey string `json:"ready_key,omitempty"`
 }
 
 type EventKind string
@@ -178,6 +185,7 @@ const (
 	EventFailing      EventKind = "checks_failing"
 	EventReview       EventKind = "new_review"
 	EventMerged       EventKind = "merged"
+	EventReady        EventKind = "ready_to_merge"
 	EventFinished     EventKind = "finished"
 	EventAgentGone    EventKind = "agent_gone"
 	EventResumed      EventKind = "resumed"
@@ -208,7 +216,7 @@ type Outcome struct {
 const resumeNote = "auto: agent resumed after needs_me"
 
 func snapshot(t Thread, prev Snapshot, now time.Time) Snapshot {
-	s := Snapshot{Group: classify(t), Reviews: t.Reviews, BotReviews: len(t.BotReviews), ReviewsSplit: true, Runs: runStates(t.Runs), Failing: t.Checks.Failing, Pending: prev.Pending, NeedsMe: t.Bead.Status == StatusNeedsMe}
+	s := Snapshot{Group: classify(t), Reviews: t.Reviews, BotReviews: len(t.BotReviews), ReviewsSplit: true, Runs: runStates(t.Runs), Failing: t.Checks.Failing, Pending: freshPending(t, prev.Pending), NeedsMe: t.Bead.Status == StatusNeedsMe, ReadyKey: prev.ReadyKey}
 	if t.Agent != nil {
 		s.AgentStatus, s.AgentSeq = t.Agent.Status, t.Agent.Seq
 		switch {
@@ -221,6 +229,9 @@ func snapshot(t Thread, prev Snapshot, now time.Time) Snapshot {
 	}
 	if t.PR != nil {
 		s.PRNumber, s.PRState = t.PR.Number, t.PR.State
+		if k := readyKey(t); k != "" {
+			s.ReadyKey = k
+		}
 	}
 	return s
 }
@@ -274,6 +285,13 @@ func transition(t Thread, prev Snapshot, first bool, now time.Time) Outcome {
 		if len(t.BotReviews) > prev.BotReviews && comparable {
 			review("a new review from " + strings.Join(slices.Compact(slices.Sorted(slices.Values(t.BotReviews[prev.BotReviews:]))), ", "))
 		}
+		if k := readyKey(t); k != "" && k != prev.ReadyKey {
+			o.Notify = true
+			ev(EventReady, "PR #%d is ready to merge (%s)", t.PR.Number, approval(t.PR))
+			o.Prompts = append(o.Prompts, fmt.Sprintf(
+				readyPrompt+"%d is ready to merge at %s: %s and its required checks passed. Finish anything left before merge (the Linear issue, your report), then merge it with `gh pr merge %d --match-head-commit %s` only if you were told to merge; otherwise say it is ready to merge and stop. The ticker tells you when it merges.",
+				t.PR.Number, t.PR.HeadSHA, approval(t.PR), t.PR.Number, t.PR.HeadSHA))
+		}
 	}
 	if t.PR != nil && t.PR.State == "MERGED" && prev.PRState != "MERGED" {
 		o.Notify = true
@@ -314,6 +332,41 @@ func transition(t Thread, prev Snapshot, first bool, now time.Time) Outcome {
 	return o
 }
 
+const readyPrompt = "[kelpie: automated, not the user] PR #"
+
+// readyKey names the PR and head commit a thread is ready to merge at, or ""
+// when it isn't ready.
+func readyKey(t Thread) string {
+	if !readyToMerge(t.PR, t.Checks) {
+		return ""
+	}
+	return fmt.Sprintf("%d@%s", t.PR.Number, t.PR.HeadSHA)
+}
+
+// freshPending drops a queued ready-to-merge prompt once its PR and head are
+// no longer the ones ready to merge: a push or a new review since it was
+// queued must not reach the worker as a go-ahead.
+func freshPending(t Thread, pending []string) []string {
+	var keep []string
+	for _, p := range pending {
+		if rest, ok := strings.CutPrefix(p, readyPrompt); ok && strings.Contains(rest, " is ready to merge at ") {
+			k := readyKey(t)
+			if k == "" || !strings.HasPrefix(rest, strings.Replace(k, "@", " is ready to merge at ", 1)+":") {
+				continue
+			}
+		}
+		keep = append(keep, p)
+	}
+	return keep
+}
+
+func approval(pr *PR) string {
+	if pr.ReviewDecision == "APPROVED" {
+		return "approved"
+	}
+	return "no review required"
+}
+
 // deliverable reports whether the ticker may type into an agent now: it has
 // been ready, untouched, for at least idle.
 func deliverable(s Snapshot, now time.Time, idle time.Duration) bool {
@@ -331,7 +384,7 @@ func coordinatorLine(threads []Thread, inbox int) string {
 		counts[classify(t)]++
 	}
 	s := "coordinator"
-	for _, g := range []Group{GroupNeedsYou, GroupFailing, GroupReview, GroupWorking} {
+	for _, g := range []Group{GroupNeedsYou, GroupReady, GroupFailing, GroupReview, GroupWorking} {
 		if n := counts[g]; n > 0 {
 			label := g.String()
 			if g == GroupNeedsYou {

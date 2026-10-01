@@ -14,6 +14,7 @@ type Group int
 const (
 	GroupNeedsYou Group = iota
 	GroupMerged
+	GroupReady
 	GroupReview
 	GroupRollingOut
 	GroupFailing
@@ -26,6 +27,7 @@ const (
 var groupNames = map[Group]string{
 	GroupNeedsYou:   "needs you",
 	GroupMerged:     "merged",
+	GroupReady:      "ready to merge",
 	GroupReview:     "review",
 	GroupRollingOut: "rolling out",
 	GroupFailing:    "checks failing",
@@ -71,6 +73,8 @@ func classify(t Thread) Group {
 		return GroupRollingOut
 	case t.PR != nil && t.PR.State == "MERGED":
 		return GroupMerged
+	case readyToMerge(t.PR, t.Checks):
+		return GroupReady
 	case t.PR != nil && t.PR.State == "OPEN" && len(t.Checks.Failing) > 0:
 		return GroupFailing
 	case t.Agent != nil && t.Agent.Status == "working":
@@ -169,6 +173,9 @@ type Snapshot struct {
 	Pending      []string          `json:"pending_prompts"`
 	// NeedsMe is the bead's needs_me status at this snapshot.
 	NeedsMe bool `json:"needs_me"`
+	// ReadySHA is the last head commit the PR was seen ready to merge at, so
+	// ready_to_merge fires once per push.
+	ReadySHA string `json:"ready_sha,omitempty"`
 }
 
 type EventKind string
@@ -178,6 +185,7 @@ const (
 	EventFailing      EventKind = "checks_failing"
 	EventReview       EventKind = "new_review"
 	EventMerged       EventKind = "merged"
+	EventReady        EventKind = "ready_to_merge"
 	EventFinished     EventKind = "finished"
 	EventAgentGone    EventKind = "agent_gone"
 	EventResumed      EventKind = "resumed"
@@ -208,7 +216,7 @@ type Outcome struct {
 const resumeNote = "auto: agent resumed after needs_me"
 
 func snapshot(t Thread, prev Snapshot, now time.Time) Snapshot {
-	s := Snapshot{Group: classify(t), Reviews: t.Reviews, BotReviews: len(t.BotReviews), ReviewsSplit: true, Runs: runStates(t.Runs), Failing: t.Checks.Failing, Pending: prev.Pending, NeedsMe: t.Bead.Status == StatusNeedsMe}
+	s := Snapshot{Group: classify(t), Reviews: t.Reviews, BotReviews: len(t.BotReviews), ReviewsSplit: true, Runs: runStates(t.Runs), Failing: t.Checks.Failing, Pending: prev.Pending, NeedsMe: t.Bead.Status == StatusNeedsMe, ReadySHA: prev.ReadySHA}
 	if t.Agent != nil {
 		s.AgentStatus, s.AgentSeq = t.Agent.Status, t.Agent.Seq
 		switch {
@@ -221,6 +229,9 @@ func snapshot(t Thread, prev Snapshot, now time.Time) Snapshot {
 	}
 	if t.PR != nil {
 		s.PRNumber, s.PRState = t.PR.Number, t.PR.State
+		if readyToMerge(t.PR, t.Checks) {
+			s.ReadySHA = t.PR.HeadSHA
+		}
 	}
 	return s
 }
@@ -274,6 +285,13 @@ func transition(t Thread, prev Snapshot, first bool, now time.Time) Outcome {
 		if len(t.BotReviews) > prev.BotReviews && comparable {
 			review("a new review from " + strings.Join(slices.Compact(slices.Sorted(slices.Values(t.BotReviews[prev.BotReviews:]))), ", "))
 		}
+		if readyToMerge(t.PR, t.Checks) && t.PR.HeadSHA != prev.ReadySHA {
+			o.Notify = true
+			ev(EventReady, "PR #%d is ready to merge (%s)", t.PR.Number, approval(t.PR))
+			o.Prompts = append(o.Prompts, fmt.Sprintf(
+				"[kelpie: automated, not the user] PR #%d is ready to merge: %s and its required checks passed. Finish anything left before merge (the Linear issue, your report), then merge it with `gh pr merge %d` only if you were told to merge; otherwise say it is ready to merge and stop. The ticker tells you when it merges.",
+				t.PR.Number, approval(t.PR), t.PR.Number))
+		}
 	}
 	if t.PR != nil && t.PR.State == "MERGED" && prev.PRState != "MERGED" {
 		o.Notify = true
@@ -314,6 +332,13 @@ func transition(t Thread, prev Snapshot, first bool, now time.Time) Outcome {
 	return o
 }
 
+func approval(pr *PR) string {
+	if pr.ReviewDecision == "APPROVED" {
+		return "approved"
+	}
+	return "no review required"
+}
+
 // deliverable reports whether the ticker may type into an agent now: it has
 // been ready, untouched, for at least idle.
 func deliverable(s Snapshot, now time.Time, idle time.Duration) bool {
@@ -331,7 +356,7 @@ func coordinatorLine(threads []Thread, inbox int) string {
 		counts[classify(t)]++
 	}
 	s := "coordinator"
-	for _, g := range []Group{GroupNeedsYou, GroupFailing, GroupReview, GroupWorking} {
+	for _, g := range []Group{GroupNeedsYou, GroupReady, GroupFailing, GroupReview, GroupWorking} {
 		if n := counts[g]; n > 0 {
 			label := g.String()
 			if g == GroupNeedsYou {

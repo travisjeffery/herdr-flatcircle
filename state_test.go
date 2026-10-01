@@ -391,3 +391,95 @@ func TestCoordinatorSortsFirstAndSummarises(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func readyPR() *PR {
+	pr := openPR()
+	pr.ReviewDecision, pr.MergeState, pr.HeadSHA = "APPROVED", "CLEAN", "aaa"
+	pr.Checks = []Check{{Name: "build", Status: "COMPLETED", Conclusion: "SUCCESS"}}
+	return pr
+}
+
+func TestReadyToMerge(t *testing.T) {
+	cases := []struct {
+		name string
+		edit func(*PR)
+		want bool
+	}{
+		{"approved and clean", func(*PR) {}, true},
+		{"no review required", func(pr *PR) { pr.ReviewDecision = "" }, true},
+		{"only optional checks failing", func(pr *PR) {
+			pr.MergeState = "UNSTABLE"
+			pr.Checks = append(pr.Checks, Check{Name: "lint", Status: "COMPLETED", Conclusion: "FAILURE"})
+		}, true},
+		{"required check pending or failing", func(pr *PR) { pr.MergeState = "BLOCKED" }, false},
+		{"review required", func(pr *PR) { pr.ReviewDecision = "REVIEW_REQUIRED" }, false},
+		{"changes requested", func(pr *PR) { pr.ReviewDecision = "CHANGES_REQUESTED" }, false},
+		{"draft", func(pr *PR) { pr.IsDraft = true }, false},
+		{"behind base", func(pr *PR) { pr.MergeState = "BEHIND" }, false},
+		{"conflicts", func(pr *PR) { pr.MergeState = "DIRTY" }, false},
+		{"merge state not computed yet", func(pr *PR) { pr.MergeState = "UNKNOWN" }, false},
+		{"checks still running", func(pr *PR) {
+			pr.MergeState = "UNSTABLE"
+			pr.Checks = append(pr.Checks, Check{Name: "e2e", Status: "IN_PROGRESS"})
+		}, false},
+		{"merged", func(pr *PR) { pr.State = "MERGED" }, false},
+	}
+	for _, c := range cases {
+		pr := readyPR()
+		c.edit(pr)
+		if got := readyToMerge(pr, summarizeChecks(pr.Checks)); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestReadyToMergeClassifiesAboveOptionalFailures(t *testing.T) {
+	pr := readyPR()
+	pr.MergeState = "UNSTABLE"
+	pr.Checks = append(pr.Checks, Check{Name: "lint", Status: "COMPLETED", Conclusion: "FAILURE"})
+	th := thread(bead(StatusInProgress), agent("idle", 1), pr)
+	if g := classify(th); g != GroupReady {
+		t.Fatalf("got %s, want %s", g, GroupReady)
+	}
+	if got := stateLine(th); got != "ready to merge · PR #7 approved" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestReadyToMergeOncePerHead(t *testing.T) {
+	th := thread(bead(StatusInProgress), agent("idle", 1), readyPR())
+	prev := Snapshot{Group: GroupReview, PRNumber: 7, PRState: "OPEN", ReviewsSplit: true}
+	o := transition(th, prev, false, t0)
+	if len(o.Events) != 1 || o.Events[0].Kind != EventReady || !o.Notify {
+		t.Fatalf("want one notifying ready_to_merge event, got %+v", o)
+	}
+	if len(o.Prompts) != 1 || !strings.Contains(o.Prompts[0], "PR #7 is ready to merge: approved") {
+		t.Fatalf("want a ready prompt, got %+v", o.Prompts)
+	}
+	prev = snapshot(th, prev, t0)
+	if o := transition(th, prev, false, t0.Add(time.Minute)); len(o.Events) != 0 || len(o.Prompts) != 0 {
+		t.Fatalf("same head re-announced: %+v", o)
+	}
+	// Losing readiness and getting it back on the same head stays quiet.
+	blocked := readyPR()
+	blocked.MergeState = "BLOCKED"
+	prev = snapshot(thread(bead(StatusInProgress), agent("idle", 1), blocked), prev, t0.Add(2*time.Minute))
+	if o := transition(th, prev, false, t0.Add(3*time.Minute)); len(o.Events) != 0 {
+		t.Fatalf("same head re-announced after a blip: %+v", o)
+	}
+	pushed := readyPR()
+	pushed.HeadSHA = "bbb"
+	if o := transition(thread(bead(StatusInProgress), agent("idle", 1), pushed), prev, false, t0.Add(4*time.Minute)); len(o.Events) != 1 || o.Events[0].Kind != EventReady {
+		t.Fatalf("a new head ready to merge should announce again: %+v", o)
+	}
+}
+
+func TestReadyToMergeFirstSightIsBaseline(t *testing.T) {
+	th := thread(bead(StatusInProgress), agent("idle", 1), readyPR())
+	if o := transition(th, Snapshot{}, true, t0); len(o.Events) != 0 {
+		t.Fatalf("first sight produced %+v", o)
+	}
+	if s := snapshot(th, Snapshot{}, t0); s.ReadySHA != "aaa" {
+		t.Fatalf("baseline ReadySHA = %q", s.ReadySHA)
+	}
+}

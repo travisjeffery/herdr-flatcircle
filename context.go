@@ -189,8 +189,8 @@ answer. Beads (bd) is the only task record; there is no TASKS.md.
 ## Every turn
 
 1. Run `+"`kelpie context`"+` first. It lists the inbox, every active thread with its
-   state (needs you, merged, review, rolling out, checks failing, idle, working,
-   blocked, no agent), the beads labelled `+"`next`"+`, and other ready beads.
+   state (needs you, merged, ready to merge, review, rolling out, checks failing,
+   idle, working, blocked, no agent), the beads labelled `+"`next`"+`, and other ready beads.
 2. Deal with inbox items, then `+"`kelpie inbox done <bead>...`"+`.
 3. Answer TJ.
 
@@ -212,6 +212,9 @@ answer. Beads (bd) is the only task record; there is no TASKS.md.
 - A needs_me bead with a "RUN:" note is waiting on a command only TJ can run.
   Relay the command verbatim in a code block, prefixed with `+"`!`"+` so TJ can paste
   it as is; when they report the result, prompt the worker with it.
+- A "ready to merge" thread's PR is approved (or needs no review) with its
+  required checks green; the ticker has told its worker. Tell TJ it is ready to
+  merge unless the worker was told to merge it itself.
 - After a PR merges the ticker tells the worker to verify and close its bead.
   Once closed, run `+"`kelpie resolve <bead>`"+` to remove the worktree (it asks
   nothing and is safe for merged work; don't pass --force without TJ).

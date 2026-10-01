@@ -19,6 +19,8 @@ type PR struct {
 	State          string    `json:"state"` // OPEN, MERGED, CLOSED
 	IsDraft        bool      `json:"isDraft"`
 	ReviewDecision string    `json:"reviewDecision"`
+	HeadSHA        string    `json:"headRefOid"`
+	MergeState     string    `json:"mergeStateStatus"`
 	Checks         []Check   `json:"statusCheckRollup"`
 	Reviews        []Review  `json:"reviews"`
 	MergedAt       time.Time `json:"mergedAt"`
@@ -47,7 +49,7 @@ func (r Review) isBot() bool { return r.Bot || strings.HasSuffix(r.Author.Login,
 // listFields stay light: statusCheckRollup across 100 PRs in a repo with many
 // checks per PR makes GitHub's GraphQL time out (504).
 const listFields = "number,title,url,headRefName,state,isDraft,mergedAt"
-const detailFields = listFields + ",reviewDecision,statusCheckRollup,reviews"
+const detailFields = listFields + ",reviewDecision,statusCheckRollup,reviews,headRefOid,mergeStateStatus"
 
 type Checks struct {
 	Failing []string
@@ -86,6 +88,26 @@ func summarizeChecks(checks []Check) Checks {
 	}
 	sort.Strings(s.Failing)
 	return s
+}
+
+// readyToMerge reports an open PR that only needs merging: approved or
+// needing no review, and GitHub's merge state says branch protection is met.
+// CLEAN and HAS_HOOKS mean every check passed; UNSTABLE means only checks
+// that aren't required failed, since a required one failing or pending makes
+// it BLOCKED. Pending checks still count against it, so a repo without
+// required checks doesn't look ready the moment its PR opens.
+func readyToMerge(pr *PR, c Checks) bool {
+	if pr == nil || pr.State != "OPEN" || pr.IsDraft || c.Pending > 0 {
+		return false
+	}
+	if pr.ReviewDecision != "APPROVED" && pr.ReviewDecision != "" {
+		return false
+	}
+	switch pr.MergeState {
+	case "CLEAN", "UNSTABLE", "HAS_HOOKS":
+		return true
+	}
+	return false
 }
 
 // reviewsBy counts reviews not written by login, so a thread's own replies

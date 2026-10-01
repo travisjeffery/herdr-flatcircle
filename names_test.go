@@ -6,7 +6,7 @@ import (
 )
 
 func TestNameFixes(t *testing.T) {
-	cfg := Config{Repo: "/r", BranchPrefix: "tj/", CoordinatorName: "shepherd"}
+	cfg := Config{Repo: "/r", BranchPrefix: "tj/", CoordinatorName: "kelpie"}
 	a := Bead{ID: "backend-ab12", Title: "Fix the thing", Status: StatusInProgress}
 	b := Bead{ID: "backend-cd34.2", Title: "Other", Status: StatusInProgress}
 	c := Bead{ID: "backend-ef56", Title: "Shared", Status: StatusInProgress}
@@ -19,14 +19,14 @@ func TestNameFixes(t *testing.T) {
 	}}
 	prs := map[string]PR{"backend-cd34.2": {Head: "tj/eng-900-renamed-branch"}}
 	agents := []Agent{
-		{PaneID: "w1:p1", Name: "herdr-shepherd", Cwd: "/w/ab12/sub"}, // drifted name: fixed
-		{PaneID: "w2:p1", Name: "", Cwd: "/w/cd34"},                   // unnamed, found via PR head: fixed
-		{PaneID: "w3:p1", Name: "x", Cwd: "/w/ef56"},                  // two agents in one worktree: ambiguous
+		{PaneID: "w1:p1", Name: "herdr-kelpie", Cwd: "/w/ab12/sub"}, // drifted name: fixed
+		{PaneID: "w2:p1", Name: "", Cwd: "/w/cd34"},                 // unnamed, found via PR head: fixed
+		{PaneID: "w3:p1", Name: "x", Cwd: "/w/ef56"},                // two agents in one worktree: ambiguous
 		{PaneID: "w3:p2", Name: "y", Cwd: "/w/ef56"},
-		{PaneID: "w4:p1", Name: "shepherd", Cwd: "/w/gh78"}, // the coordinator is never renamed
+		{PaneID: "w4:p1", Name: "kelpie", Cwd: "/w/gh78"}, // the coordinator is never renamed
 	}
 	got := nameFixes(cfg, []Bead{a, b, c, d}, agents, prs, wts)
-	want := []rename{{Pane: "w1:p1", From: "herdr-shepherd", To: "backend-ab12"}, {Pane: "w2:p1", From: "", To: "backend-cd34-2"}}
+	want := []rename{{Pane: "w1:p1", From: "herdr-kelpie", To: "backend-ab12"}, {Pane: "w2:p1", From: "", To: "backend-cd34-2"}}
 	if !slices.Equal(got, want) {
 		t.Fatalf("got %+v\nwant %+v", got, want)
 	}
@@ -39,5 +39,19 @@ func TestNameFixes(t *testing.T) {
 	other := []Agent{{PaneID: "w1:p1", Name: "backend-ef56", Cwd: "/w/ab12"}}
 	if got := nameFixes(cfg, []Bead{a, c}, other, nil, wts); len(got) != 0 {
 		t.Fatalf("stole another bead's agent: %+v", got)
+	}
+}
+
+func TestNameFixesRenamesTheShepherdCoordinator(t *testing.T) {
+	cfg := Config{Repo: "/r", CoordinatorName: "kelpie"}
+	old := []Agent{{PaneID: "w9:p1", Name: "shepherd", Cwd: "/s/coordinator"}}
+	want := []rename{{Pane: "w9:p1", From: "shepherd", To: "kelpie"}}
+	if got := nameFixes(cfg, nil, old, nil, nil); !slices.Equal(got, want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+	// Once a kelpie coordinator exists, a leftover shepherd agent is left alone.
+	both := append(old, Agent{PaneID: "w9:p2", Name: "kelpie"})
+	if got := nameFixes(cfg, nil, both, nil, nil); len(got) != 0 {
+		t.Fatalf("renamed with a kelpie coordinator present: %+v", got)
 	}
 }

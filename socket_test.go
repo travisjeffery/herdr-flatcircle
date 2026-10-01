@@ -59,7 +59,7 @@ func TestTickerHerdrCallsFollowConfiguredSocket(t *testing.T) {
 }
 
 func TestRunningSocket(t *testing.T) {
-	t.Setenv("SHEPHERD_STATE_DIR", t.TempDir())
+	t.Setenv("KELPIE_STATE_DIR", t.TempDir())
 	if err := os.WriteFile(socketFile(), []byte("/coord.sock\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestSocketWarning(t *testing.T) {
 }
 
 func TestRunningPIDIgnoresReusedPID(t *testing.T) {
-	t.Setenv("SHEPHERD_STATE_DIR", t.TempDir())
+	t.Setenv("KELPIE_STATE_DIR", t.TempDir())
 	other := exec.Command("sleep", "30")
 	if err := other.Start(); err != nil {
 		t.Fatal(err)
@@ -108,10 +108,10 @@ func TestRunningPIDIgnoresReusedPID(t *testing.T) {
 
 func TestTickerArgs(t *testing.T) {
 	for args, want := range map[string]bool{
-		"/home/tj/.config/herdr/plugins/shepherd/bin/shepherd ticker run\n": true,
-		"shepherd ticker run":    true,
-		"sleep 30":               false,
-		"shepherd ticker status": false,
+		"/home/tj/.config/herdr/plugins/kelpie/bin/kelpie ticker run\n": true,
+		"kelpie ticker run":    true,
+		"sleep 30":             false,
+		"kelpie ticker status": false,
 	} {
 		if got := tickerArgs(args); got != want {
 			t.Errorf("tickerArgs(%q) = %v", args, got)

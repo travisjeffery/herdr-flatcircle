@@ -11,19 +11,29 @@ type rename struct {
 
 // nameFixes finds agents working an active bead under the wrong name: the only
 // agent inside the bead's linked worktree, while no agent carries the bead's
-// name. Shepherd ties an agent to its bead by name alone, so a misnamed worker
+// name. Kelpie ties an agent to its bead by name alone, so a misnamed worker
 // drops out of the sidebar, the prompts and the inbox. An agent already named
-// after another active bead, or the coordinator, is never renamed.
+// after another active bead, or the coordinator, is never renamed. A
+// coordinator still named shepherd, from before the rename, becomes kelpie's.
 func nameFixes(cfg Config, active []Bead, agents []Agent, prs map[string]PR, wts map[string][]Worktree) []rename {
 	named := map[string]bool{}
 	for _, a := range agents {
 		named[a.Name] = true
 	}
-	claimed := map[string]bool{cfg.CoordinatorName: true}
+	claimed := map[string]bool{cfg.CoordinatorName: true, legacyName: true}
 	for _, b := range active {
 		claimed[agentName(b.ID)] = true
 	}
 	var out []rename
+	if !named[cfg.CoordinatorName] {
+		for _, a := range agents {
+			if a.Name == legacyName {
+				out = append(out, rename{Pane: a.PaneID, From: a.Name, To: cfg.CoordinatorName})
+				named[cfg.CoordinatorName] = true
+				break
+			}
+		}
+	}
 	for _, b := range active {
 		want := agentName(b.ID)
 		if named[want] {

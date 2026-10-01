@@ -46,8 +46,8 @@ func TestSetViewSortsByThreadRank(t *testing.T) {
 	if err := setView(f); err != nil {
 		t.Fatal(err)
 	}
-	if f.view == nil || f.view.Source != "plugin:shepherd" || f.view.Label != "shepherd" {
-		t.Fatalf("view not installed as plugin:shepherd/shepherd: %+v", f.view)
+	if f.view == nil || f.view.Source != "plugin:kelpie" || f.view.Label != "kelpie" {
+		t.Fatalf("view not installed as plugin:kelpie/kelpie: %+v", f.view)
 	}
 	first := f.view.Sort[0]
 	if !reflect.DeepEqual(first.Field, map[string]any{"token": "sh_rank"}) || first.Order != "asc" {
@@ -66,7 +66,7 @@ func TestSetViewIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestUnconfigureClearsOnlyShepherdsView(t *testing.T) {
+func TestUnconfigureClearsOnlyKelpiesView(t *testing.T) {
 	f := &fakeHerdr{}
 	_ = setView(f)
 	var cleared []string
@@ -108,7 +108,7 @@ func TestSocketRPCWireFormat(t *testing.T) {
 		var req map[string]any
 		_ = json.Unmarshal(line, &req)
 		got <- req
-		conn.Write([]byte(`{"id":"shepherd","result":{"type":"agent_view","active":true,"source":"plugin:shepherd"}}` + "\n"))
+		conn.Write([]byte(`{"id":"kelpie","result":{"type":"agent_view","active":true,"source":"plugin:kelpie"}}` + "\n"))
 	}()
 	if err := setView(socketRPC{path}); err != nil {
 		t.Fatal(err)
@@ -118,7 +118,7 @@ func TestSocketRPCWireFormat(t *testing.T) {
 		t.Fatalf("method %v", req["method"])
 	}
 	params := req["params"].(map[string]any)
-	if params["source"] != "plugin:shepherd" || params["label"] != "shepherd" {
+	if params["source"] != "plugin:kelpie" || params["label"] != "kelpie" {
 		t.Fatalf("params %v", params)
 	}
 }
@@ -137,7 +137,7 @@ func TestSocketRPCSurfacesHerdrErrors(t *testing.T) {
 		}
 		defer conn.Close()
 		_, _ = bufio.NewReader(conn).ReadBytes('\n')
-		conn.Write([]byte(`{"id":"shepherd","error":{"code":"plugin_not_found","message":"plugin not found"}}` + "\n"))
+		conn.Write([]byte(`{"id":"kelpie","error":{"code":"plugin_not_found","message":"plugin not found"}}` + "\n"))
 	}()
 	if err := setView(socketRPC{path}); err == nil {
 		t.Fatal("a herdr error response must be an error")

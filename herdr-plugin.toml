@@ -1,6 +1,6 @@
-id = "shepherd"
-name = "Shepherd"
-version = "0.2.0"
+id = "kelpie"
+name = "Kelpie"
+version = "0.3.0"
 min_herdr_version = "0.9.1"
 description = "One coordinator, a worktree and agent per bead, beads as the only record."
 platforms = ["linux", "macos"]
@@ -9,42 +9,42 @@ platforms = ["linux", "macos"]
 command = ["sh", "scripts/build.sh"]
 
 [[startup]]
-command = ["bin/shepherd", "startup"]
+command = ["bin/kelpie", "startup"]
 
 [[actions]]
 id = "configure"
-title = "Shepherd: set up (config for this workspace's repo, CLI link, agent view)"
+title = "Kelpie: set up (config for this workspace's repo, CLI link, agent view)"
 contexts = ["workspace"]
-command = ["bin/shepherd", "configure"]
+command = ["bin/kelpie", "configure"]
 
 [[actions]]
 id = "board"
-title = "Shepherd: board"
+title = "Kelpie: board"
 contexts = ["global", "workspace"]
-command = ["bin/shepherd", "action", "board"]
+command = ["bin/kelpie", "action", "board"]
 
 [[actions]]
 id = "coordinator"
-title = "Shepherd: open the coordinator"
+title = "Kelpie: open the coordinator"
 contexts = ["global", "workspace"]
-command = ["bin/shepherd", "coordinator"]
+command = ["bin/kelpie", "coordinator"]
 
 [[actions]]
 id = "focus-clipboard"
-title = "Shepherd: focus or start the bead on the clipboard"
+title = "Kelpie: focus or start the bead on the clipboard"
 contexts = ["global", "workspace"]
-command = ["bin/shepherd", "focus"]
+command = ["bin/kelpie", "focus"]
 
 [[actions]]
 id = "focus-clipboard-codex"
-title = "Shepherd: focus or start the bead on the clipboard (Codex)"
+title = "Kelpie: focus or start the bead on the clipboard (Codex)"
 contexts = ["global", "workspace"]
-command = ["bin/shepherd", "focus", "--agent", "codex"]
+command = ["bin/kelpie", "focus", "--agent", "codex"]
 
 [[panes]]
 id = "board"
-title = "Shepherd"
+title = "Kelpie"
 placement = "popup"
 width = "85%"
 height = "80%"
-command = ["bin/shepherd", "board"]
+command = ["bin/kelpie", "board"]

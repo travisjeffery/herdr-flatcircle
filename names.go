@@ -25,14 +25,9 @@ func nameFixes(cfg Config, active []Bead, agents []Agent, prs map[string]PR, wts
 		claimed[agentName(b.ID)] = true
 	}
 	var out []rename
-	if !named[cfg.CoordinatorName] {
-		for _, a := range agents {
-			if a.Name == legacyName {
-				out = append(out, rename{Pane: a.PaneID, From: a.Name, To: cfg.CoordinatorName})
-				named[cfg.CoordinatorName] = true
-				break
-			}
-		}
+	if a, ok := legacyCoordinator(cfg, agents); ok {
+		out = append(out, rename{Pane: a.PaneID, From: a.Name, To: cfg.CoordinatorName})
+		named[cfg.CoordinatorName] = true
 	}
 	for _, b := range active {
 		want := agentName(b.ID)
@@ -56,4 +51,27 @@ func nameFixes(cfg Config, active []Bead, agents []Agent, prs map[string]PR, wts
 		named[want] = true
 	}
 	return out
+}
+
+// legacyCoordinator is the coordinator agent still named shepherd, from before
+// the rename, while no agent carries the coordinator's name.
+func legacyCoordinator(cfg Config, agents []Agent) (Agent, bool) {
+	if cfg.CoordinatorName == legacyName {
+		return Agent{}, false
+	}
+	var legacy *Agent
+	for i, a := range agents {
+		switch a.Name {
+		case cfg.CoordinatorName:
+			return Agent{}, false
+		case legacyName:
+			if legacy == nil {
+				legacy = &agents[i]
+			}
+		}
+	}
+	if legacy == nil {
+		return Agent{}, false
+	}
+	return *legacy, true
 }

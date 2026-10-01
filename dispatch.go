@@ -198,6 +198,15 @@ func openCoordinator(cfg Config, h Herdr, kind string) (string, error) {
 				return "focused the coordinator", h.Focus(a.Name)
 			}
 		}
+		// A coordinator still named shepherd is this one; renaming it here
+		// keeps a second coordinator from starting before the ticker does.
+		if a, ok := legacyCoordinator(cfg, agents); ok {
+			if err := h.Rename(a.PaneID, cfg.CoordinatorName); err != nil {
+				return "", err
+			}
+			moveQueuedBrief(a.Name, cfg.CoordinatorName)
+			return "renamed the shepherd coordinator to " + cfg.CoordinatorName + " and focused it", h.Focus(cfg.CoordinatorName)
+		}
 	}
 	if kind == "" {
 		kind = cfg.CoordinatorAgent
@@ -242,6 +251,16 @@ func outboxDir() string { return filepath.Join(stateDir(), "outbox") }
 
 func queueBrief(agent, text string) error {
 	return writeAtomic(filepath.Join(outboxDir(), agent+".md"), []byte(text))
+}
+
+// moveQueuedBrief follows a renamed agent with its queued brief, which is
+// delivered by agent name. A brief already queued under the new name wins.
+func moveQueuedBrief(from, to string) {
+	src, dst := filepath.Join(outboxDir(), from+".md"), filepath.Join(outboxDir(), to+".md")
+	if _, err := os.Stat(dst); err == nil {
+		return
+	}
+	_ = os.Rename(src, dst)
 }
 
 // deliverOutbox sends queued briefs to agents that have become ready.

@@ -355,6 +355,20 @@ func logPath() string { return filepath.Join(stateDir(), "ticker.log") }
 // socketFile records the herdr socket the running ticker follows.
 func socketFile() string { return filepath.Join(stateDir(), "ticker.socket") }
 
+// nameFile records which tool the running ticker is. A ticker without one is
+// a shepherd ticker from before the rename, still running the old binary.
+func nameFile() string { return filepath.Join(stateDir(), "ticker.name") }
+
+const tickerName = "kelpie"
+
+// runningLegacy reports whether the running ticker predates kelpie: a state
+// dir migrated under a live shepherd ticker carries its pid and socket files
+// over, and that ticker would otherwise be kept as if it were current.
+func runningLegacy() bool {
+	b, err := os.ReadFile(nameFile())
+	return err != nil || strings.TrimSpace(string(b)) != tickerName
+}
+
 // runningSocket is the socket the running ticker follows, "" if it is not
 // running or predates socketFile.
 func runningSocket() string {
@@ -431,6 +445,10 @@ func tickerRun(cfg Config) error {
 		return err
 	}
 	defer os.Remove(socketFile())
+	if err := os.WriteFile(nameFile(), []byte(tickerName), 0o644); err != nil {
+		return err
+	}
+	defer os.Remove(nameFile())
 	f, err := os.OpenFile(logPath(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
@@ -463,16 +481,20 @@ func tickerRun(cfg Config) error {
 func tickerStart(cfg Config) error {
 	if pid := runningPID(); pid != 0 {
 		sock := runningSocket()
-		if sock != "" && sameSocket(sock, cfg.coordSocket()) {
+		switch {
+		case runningLegacy():
+			fmt.Printf("ticker (pid %d) is shepherd's, from before the rename; restarting it as kelpie\n", pid)
+		case sock != "" && sameSocket(sock, cfg.coordSocket()):
 			fmt.Printf("ticker already running (pid %d)\n", pid)
 			return nil
+		default:
+			// herdr_socket changed since it started, or an older version started
+			// it on whichever server ran startup: follow the configured server.
+			if sock == "" {
+				sock = "an unknown herdr server"
+			}
+			fmt.Printf("ticker (pid %d) is on %s, not %s; restarting it\n", pid, sock, cfg.coordSocket())
 		}
-		// herdr_socket changed since it started, or an older kelpie started it
-		// on whichever server ran startup: follow the configured server.
-		if sock == "" {
-			sock = "an unknown herdr server"
-		}
-		fmt.Printf("ticker (pid %d) is on %s, not %s; restarting it\n", pid, sock, cfg.coordSocket())
 		if err := tickerStop(); err != nil {
 			return err
 		}
@@ -515,9 +537,12 @@ func tickerStatus(cfg Config) {
 	if pid := runningPID(); pid != 0 {
 		sock := runningSocket()
 		if sock == "" {
-			sock = "unknown herdr server (started by an older kelpie; restart it)"
+			sock = "unknown herdr server (started by an older version; restart it)"
 		}
 		fmt.Printf("ticker running (pid %d) on %s, log %s\n", pid, sock, logPath())
+		if runningLegacy() {
+			fmt.Println("warning: it is shepherd's ticker, from before the rename; run `kelpie ticker start` to restart it as kelpie")
+		}
 		if w := socketWarning(runningSocket(), cfg.coordSocket(), os.Getenv("HERDR_SOCKET_PATH")); w != "" {
 			fmt.Println("warning:", w)
 		}
@@ -620,6 +645,7 @@ func (t Ticker) fixNames(st *TickerState) {
 		why := "it is the only agent in that bead's worktree"
 		if r.From == legacyName {
 			why = "the coordinator's name before the rename to kelpie"
+			moveQueuedBrief(r.From, r.To)
 		}
 		t.log.Printf("renamed %s from %q to %s: %s", r.Pane, r.From, r.To, why)
 	}

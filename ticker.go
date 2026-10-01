@@ -185,7 +185,37 @@ func (t Ticker) refreshPRs(st *TickerState, active []Bead) {
 		}
 		prs[b.ID] = pr
 	}
+	t.gatePRs(st.PRs, prs)
 	st.PRs = prs
+}
+
+// gatePRs fetches, in one query, the merge gate of every PR that is otherwise
+// mergeable. When the query fails a PR keeps the gate it had at the same
+// head; without one it is not ready to merge.
+func (t Ticker) gatePRs(old, prs map[string]PR) {
+	var want []PR
+	for _, pr := range prs {
+		if mergeable(&pr, summarizeChecks(pr.Checks)) {
+			want = append(want, pr)
+		}
+	}
+	if len(want) == 0 {
+		return
+	}
+	gates, err := t.gh.Gates(want, time.Now())
+	if err != nil {
+		t.log.Printf("gh merge gates: %v", err)
+	}
+	for id, pr := range prs {
+		if g, ok := gates[pr.URL]; ok {
+			pr.Gate = &g
+		} else if err != nil && old[id].Gate != nil && old[id].Gate.Head == pr.HeadSHA {
+			pr.Gate = old[id].Gate
+		} else {
+			pr.Gate = nil
+		}
+		prs[id] = pr
+	}
 }
 
 // repoPRs is the PR listing of the bead's own repository, or false when

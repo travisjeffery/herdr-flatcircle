@@ -396,6 +396,8 @@ func readyPR() *PR {
 	pr := openPR()
 	pr.ReviewDecision, pr.MergeState, pr.HeadSHA = "APPROVED", "CLEAN", "aaa"
 	pr.Checks = []Check{{Name: "build", Status: "COMPLETED", Conclusion: "SUCCESS"}}
+	pr.Reviews = []Review{{State: "APPROVED", SubmittedAt: t0.Add(-time.Hour)}}
+	pr.Gate = &MergeGate{Head: "aaa", HeadCommittedAt: t0.Add(-2 * time.Hour), CheckedAt: t0}
 	return pr
 }
 
@@ -423,6 +425,23 @@ func TestReadyToMerge(t *testing.T) {
 			pr.Checks = append(pr.Checks, Check{Name: "e2e", Status: "IN_PROGRESS"})
 		}, false},
 		{"merged", func(pr *PR) { pr.State = "MERGED" }, false},
+		{"open review thread", func(pr *PR) { pr.Gate.OpenThreads = 1 }, false},
+		{"approval predates the head", func(pr *PR) { pr.Gate.HeadCommittedAt = t0.Add(-time.Minute) }, false},
+		{"approval at the head's commit time", func(pr *PR) { pr.Gate.HeadCommittedAt = pr.Reviews[0].SubmittedAt }, true},
+		{"approval older than 7 days", func(pr *PR) {
+			pr.Gate.HeadCommittedAt = t0.Add(-9 * 24 * time.Hour)
+			pr.Reviews[0].SubmittedAt = t0.Add(-8 * 24 * time.Hour)
+		}, false},
+		{"a fresh approval beside a stale one", func(pr *PR) {
+			pr.Reviews = append([]Review{{State: "APPROVED", SubmittedAt: t0.Add(-30 * 24 * time.Hour)}}, pr.Reviews...)
+		}, true},
+		{"commented after the head is no approval", func(pr *PR) { pr.Reviews[0].State = "COMMENTED" }, false},
+		{"no review required needs no approval", func(pr *PR) { pr.ReviewDecision, pr.Reviews = "", nil }, true},
+		{"no review required still needs threads resolved", func(pr *PR) {
+			pr.ReviewDecision, pr.Reviews, pr.Gate.OpenThreads = "", nil, 2
+		}, false},
+		{"gate not fetched", func(pr *PR) { pr.Gate = nil }, false},
+		{"gate from another head", func(pr *PR) { pr.Gate.Head = "old" }, false},
 	}
 	for _, c := range cases {
 		pr := readyPR()
@@ -443,6 +462,45 @@ func TestReadyToMergeClassifiesAboveOptionalFailures(t *testing.T) {
 	}
 	if got := stateLine(th); got != "ready to merge · PR #7 approved" {
 		t.Errorf("got %q", got)
+	}
+}
+
+// backend#14388 on 2026-10-01: reviewDecision APPROVED from a 09-23 approval
+// that predates the 10-01 push, with three unresolved Codex threads.
+func TestApprovedButBlocked(t *testing.T) {
+	pr := readyPR()
+	pr.Number = 14388
+	pr.Reviews = []Review{{State: "APPROVED", SubmittedAt: time.Date(2026, 9, 23, 4, 50, 32, 0, time.UTC)}}
+	pr.Gate = &MergeGate{Head: "aaa", OpenThreads: 3, HeadCommittedAt: time.Date(2026, 10, 1, 19, 44, 52, 0, time.UTC), CheckedAt: time.Date(2026, 10, 1, 20, 0, 0, 0, time.UTC)}
+	th := thread(bead(StatusInProgress), agent("idle", 1), pr)
+	if g := classify(th); g == GroupReady {
+		t.Fatalf("classified %s", g)
+	}
+	if got, want := stateLine(th), "review · PR #14388 approved but blocked: 3 open threads, stale approval"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	prev := Snapshot{Group: GroupReview, PRNumber: 14388, PRState: "OPEN", ReviewsSplit: true}
+	if o := transition(th, prev, false, t0); len(o.Events) != 0 || len(o.Prompts) != 0 {
+		t.Fatalf("announced a blocked PR: %+v", o)
+	}
+	if k := readyKey(th); k != "" {
+		t.Fatalf("readyKey = %q", k)
+	}
+}
+
+func TestParseGates(t *testing.T) {
+	out := []byte(`{"data":{
+		"p0":{"pullRequest":{"headRefOid":"8b47","commits":{"nodes":[{"commit":{"committedDate":"2026-10-01T19:44:52Z"}}]},
+			"reviewThreads":{"nodes":[{"isResolved":false,"isOutdated":false},{"isResolved":true,"isOutdated":false},{"isResolved":false,"isOutdated":true}]}}},
+		"p1":{"pullRequest":null}}}`)
+	alias := map[string]string{"p0": "https://github.com/o/r/pull/1", "p1": "https://github.com/o/r/pull/2", "p2": "https://github.com/o/r/pull/3"}
+	gates, err := parseGates(out, alias, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := MergeGate{Head: "8b47", OpenThreads: 1, HeadCommittedAt: time.Date(2026, 10, 1, 19, 44, 52, 0, time.UTC), CheckedAt: t0}
+	if len(gates) != 1 || gates["https://github.com/o/r/pull/1"] != want {
+		t.Fatalf("got %+v", gates)
 	}
 }
 
@@ -468,7 +526,7 @@ func TestReadyToMergeOncePerHead(t *testing.T) {
 		t.Fatalf("same head re-announced after a blip: %+v", o)
 	}
 	pushed := readyPR()
-	pushed.HeadSHA = "bbb"
+	pushed.HeadSHA, pushed.Gate.Head = "bbb", "bbb"
 	if o := transition(thread(bead(StatusInProgress), agent("idle", 1), pushed), prev, false, t0.Add(4*time.Minute)); len(o.Events) != 1 || o.Events[0].Kind != EventReady {
 		t.Fatalf("a new head ready to merge should announce again: %+v", o)
 	}

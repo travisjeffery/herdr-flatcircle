@@ -24,7 +24,25 @@ type PR struct {
 	Checks         []Check   `json:"statusCheckRollup"`
 	Reviews        []Review  `json:"reviews"`
 	MergedAt       time.Time `json:"mergedAt"`
+	// Gate is what readyToMerge needs beyond gh pr view, fetched only for PRs
+	// that are otherwise mergeable.
+	Gate *MergeGate `json:"gate,omitempty"`
 }
+
+// MergeGate is a PR's review state at one head: what GitHub's reviewDecision
+// hides, since an approval stays APPROVED across later pushes unless the repo
+// dismisses stale reviews.
+type MergeGate struct {
+	Head string `json:"head"`
+	// OpenThreads counts unresolved review threads not outdated by a push.
+	OpenThreads     int       `json:"open_threads"`
+	HeadCommittedAt time.Time `json:"head_committed_at"`
+	CheckedAt       time.Time `json:"checked_at"`
+}
+
+// approvalMaxAge is how old the approval of a head may be and still let it
+// merge.
+const approvalMaxAge = 7 * 24 * time.Hour
 
 type Check struct {
 	Name       string `json:"name"`
@@ -97,6 +115,12 @@ func summarizeChecks(checks []Check) Checks {
 // it BLOCKED. Pending checks still count against it, so a repo without
 // required checks doesn't look ready the moment its PR opens.
 func readyToMerge(pr *PR, c Checks) bool {
+	return mergeable(pr, c) && pr.Gate != nil && pr.Gate.Head == pr.HeadSHA && len(mergeBlockers(pr)) == 0
+}
+
+// mergeable is readyToMerge before the review gate: everything gh pr view
+// can tell.
+func mergeable(pr *PR, c Checks) bool {
 	if pr == nil || pr.State != "OPEN" || pr.IsDraft || c.Pending > 0 {
 		return false
 	}
@@ -108,6 +132,40 @@ func readyToMerge(pr *PR, c Checks) bool {
 		return true
 	}
 	return false
+}
+
+// mergeBlockers is what keeps a mergeable PR from being ready: review threads
+// still open, or no approval since the head was committed and within
+// approvalMaxAge. A repo that requires no review needs no approval.
+func mergeBlockers(pr *PR) []string {
+	g := pr.Gate
+	if g == nil {
+		return nil
+	}
+	var out []string
+	if g.OpenThreads > 0 {
+		out = append(out, fmt.Sprintf("%d open %s", g.OpenThreads, plural(g.OpenThreads, "thread")))
+	}
+	if pr.ReviewDecision == "APPROVED" && !freshApproval(pr.Reviews, g) {
+		out = append(out, "stale approval")
+	}
+	return out
+}
+
+func freshApproval(reviews []Review, g *MergeGate) bool {
+	for _, r := range reviews {
+		if r.State == "APPROVED" && !r.SubmittedAt.Before(g.HeadCommittedAt) && g.CheckedAt.Sub(r.SubmittedAt) <= approvalMaxAge {
+			return true
+		}
+	}
+	return false
+}
+
+func plural(n int, s string) string {
+	if n == 1 {
+		return s
+	}
+	return s + "s"
 }
 
 // reviewsBy counts reviews not written by login, so a thread's own replies
@@ -198,6 +256,73 @@ func (g GH) MarkBotReviews(pr *PR) error {
 		pr.Reviews[i].Bot = bots[pr.Reviews[i].Author.Login]
 	}
 	return nil
+}
+
+// Gates fetches the merge gate of every PR in one GraphQL query, keyed by
+// URL. A PR missing from the result has no gate and so is not ready.
+func (g GH) Gates(prs []PR, now time.Time) (map[string]MergeGate, error) {
+	var q strings.Builder
+	alias := map[string]string{}
+	for i, pr := range prs {
+		m := prURL.FindStringSubmatch(pr.URL)
+		if m == nil {
+			continue
+		}
+		owner, name, _ := strings.Cut(m[1], "/")
+		a := fmt.Sprintf("p%d", i)
+		alias[a] = pr.URL
+		fmt.Fprintf(&q, `%s: repository(owner: %q, name: %q) { pullRequest(number: %s) { headRefOid commits(last: 1) { nodes { commit { committedDate } } } reviewThreads(first: 100) { nodes { isResolved isOutdated } } } } `, a, owner, name, m[2])
+	}
+	if len(alias) == 0 {
+		return nil, nil
+	}
+	out, err := g.run("api", "graphql", "-f", "query={ "+q.String()+"}")
+	if err != nil {
+		return nil, err
+	}
+	return parseGates(out, alias, now)
+}
+
+func parseGates(out []byte, alias map[string]string, now time.Time) (map[string]MergeGate, error) {
+	var resp struct {
+		Data map[string]*struct {
+			PullRequest *struct {
+				HeadRefOid string `json:"headRefOid"`
+				Commits    struct {
+					Nodes []struct {
+						Commit struct {
+							CommittedDate time.Time `json:"committedDate"`
+						} `json:"commit"`
+					} `json:"nodes"`
+				} `json:"commits"`
+				ReviewThreads struct {
+					Nodes []struct {
+						IsResolved bool `json:"isResolved"`
+						IsOutdated bool `json:"isOutdated"`
+					} `json:"nodes"`
+				} `json:"reviewThreads"`
+			} `json:"pullRequest"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(out, &resp); err != nil {
+		return nil, err
+	}
+	gates := map[string]MergeGate{}
+	for a, url := range alias {
+		r := resp.Data[a]
+		if r == nil || r.PullRequest == nil || len(r.PullRequest.Commits.Nodes) == 0 {
+			continue
+		}
+		pr := r.PullRequest
+		gate := MergeGate{Head: pr.HeadRefOid, HeadCommittedAt: pr.Commits.Nodes[0].Commit.CommittedDate, CheckedAt: now}
+		for _, t := range pr.ReviewThreads.Nodes {
+			if !t.IsResolved && !t.IsOutdated {
+				gate.OpenThreads++
+			}
+		}
+		gates[url] = gate
+	}
+	return gates, nil
 }
 
 // prForBead picks the PR a bead is being delivered through: one on the bead's

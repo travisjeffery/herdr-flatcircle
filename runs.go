@@ -50,20 +50,32 @@ func (g GH) RunView(repo, id string) (Run, error) {
 }
 
 func (t Ticker) refreshRuns(st *TickerState, active []Bead) {
-	runs := map[string][]Run{}
+	type ref struct{ bead, url string }
+	var refs []ref
 	for _, b := range active {
 		for _, u := range NotedRuns(b.Notes) {
-			m := runURL.FindStringSubmatch(u)
-			r, err := t.gh.RunView(m[1], m[2])
-			if err != nil {
-				t.log.Printf("gh run view %s: %v", u, err)
-				i := slices.IndexFunc(st.Runs[b.ID], func(old Run) bool { return runKey(old) == m[2] })
-				if i < 0 {
-					continue
-				}
-				r = st.Runs[b.ID][i]
+			refs = append(refs, ref{b.ID, u})
+		}
+	}
+	found := make([]*Run, len(refs))
+	eachLimit(len(refs), ghParallel, func(i int) {
+		id, u := refs[i].bead, refs[i].url
+		m := runURL.FindStringSubmatch(u)
+		r, err := t.gh.RunView(m[1], m[2])
+		if err != nil {
+			t.log.Printf("gh run view %s: %v", u, err)
+			j := slices.IndexFunc(st.Runs[id], func(old Run) bool { return runKey(old) == m[2] })
+			if j < 0 {
+				return
 			}
-			runs[b.ID] = append(runs[b.ID], r)
+			r = st.Runs[id][j]
+		}
+		found[i] = &r
+	})
+	runs := map[string][]Run{}
+	for i, r := range found {
+		if r != nil {
+			runs[refs[i].bead] = append(runs[refs[i].bead], *r)
 		}
 	}
 	st.Runs = runs

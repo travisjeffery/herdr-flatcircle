@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -75,10 +76,12 @@ type Ticker struct {
 	beads Beads
 	gh    GH
 	log   *log.Logger
+	side  *sidebar
 }
 
 func newTicker(cfg Config, logger *log.Logger) Ticker {
-	return Ticker{cfg: cfg, herdr: newHerdr().on(cfg.coordSocket()), beads: Beads{}, gh: GH{repo: cfg.Repo}, log: logger}
+	h := newHerdr().on(cfg.coordSocket())
+	return Ticker{cfg: cfg, herdr: h, beads: Beads{}, gh: GH{repo: cfg.Repo}, log: logger, side: newSidebar(h, cfg.tick(), logger)}
 }
 
 // gather joins beads, agents and PRs into threads. Only beads a worker could
@@ -147,49 +150,78 @@ func (t Ticker) refreshPRs(st *TickerState, active []Bead) {
 			inList[pr.URL] = pr
 		}
 	}
+	// Each bead costs a gh pr view or two; run them a few at a time so a pass
+	// over dozens of beads doesn't take a minute.
+	found := make([]*PR, len(active))
+	eachLimit(len(active), ghParallel, func(i int) {
+		if pr, ok := t.beadPR(st, active[i], mine, inList); ok {
+			found[i] = &pr
+		}
+	})
 	prs := map[string]PR{}
-	for _, b := range active {
-		own, listed := repoPRs(t.cfg, b, mine)
-		if !listed {
-			if old, ok := st.PRs[b.ID]; ok {
-				prs[b.ID] = old
-			}
-			continue
+	for i, b := range active {
+		if found[i] != nil {
+			prs[b.ID] = *found[i]
 		}
-		byURL := map[string]PR{}
-		for _, u := range NotedPRs(b.Notes) {
-			if pr, ok := inList[u]; ok {
-				byURL[u] = pr
-			} else if pr, err := t.gh.View(u, false); err == nil {
-				byURL[u] = pr
-			}
-		}
-		pr, ok := prForBead(b, t.cfg.BranchPrefix, own, byURL)
-		if !ok {
-			continue
-		}
-		if pr.State == "OPEN" {
-			full, err := t.gh.View(pr.URL, true)
-			if err == nil {
-				err = t.gh.MarkBotReviews(&full)
-			}
-			if err == nil {
-				pr = full
-			} else {
-				t.log.Printf("gh pr view %d: %v", pr.Number, err)
-				old, ok := st.PRs[b.ID]
-				if !ok || old.Number != pr.Number {
-					// The list entry has no reviews or checks; recording it would make
-					// the next good pass see every existing review as new.
-					continue
-				}
-				pr = old
-			}
-		}
-		prs[b.ID] = pr
 	}
 	t.gatePRs(st.PRs, prs)
 	st.PRs = prs
+}
+
+// beadPR is the PR b is delivered through, in full detail when open; false
+// when it has none or its detail can't be fetched and nothing older stands in.
+func (t Ticker) beadPR(st *TickerState, b Bead, mine map[string][]PR, inList map[string]PR) (PR, bool) {
+	own, listed := repoPRs(t.cfg, b, mine)
+	if !listed {
+		old, ok := st.PRs[b.ID]
+		return old, ok
+	}
+	byURL := map[string]PR{}
+	for _, u := range NotedPRs(b.Notes) {
+		if pr, ok := inList[u]; ok {
+			byURL[u] = pr
+		} else if pr, err := t.gh.View(u, false); err == nil {
+			byURL[u] = pr
+		}
+	}
+	pr, ok := prForBead(b, t.cfg.BranchPrefix, own, byURL)
+	if !ok || pr.State != "OPEN" {
+		return pr, ok
+	}
+	full, err := t.gh.View(pr.URL, true)
+	if err == nil {
+		err = t.gh.MarkBotReviews(&full)
+	}
+	if err == nil {
+		return full, true
+	}
+	t.log.Printf("gh pr view %d: %v", pr.Number, err)
+	old, ok := st.PRs[b.ID]
+	if !ok || old.Number != pr.Number {
+		// The list entry has no reviews or checks; recording it would make
+		// the next good pass see every existing review as new.
+		return PR{}, false
+	}
+	return old, true
+}
+
+// ghParallel bounds the gh calls a pass makes at once.
+const ghParallel = 8
+
+// eachLimit calls f(0..n-1), at most limit at a time, and waits for them.
+func eachLimit(n, limit int, f func(int)) {
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, limit)
+	for i := range n {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			f(i)
+		}()
+	}
+	wg.Wait()
 }
 
 // gatePRs fetches, in one query, the merge gate of every PR that is otherwise
@@ -253,7 +285,7 @@ func (t Ticker) once(st *TickerState) error {
 	for _, name := range deliverOutbox(t.herdr, agents) {
 		t.log.Printf("delivered queued brief to %s", name)
 	}
-	ttl := 4 * t.cfg.tick()
+	var rows []sidebarRow
 	current := map[string]bool{}
 	for _, th := range threads {
 		id := th.Bead.ID
@@ -292,24 +324,23 @@ func (t Ticker) once(st *TickerState) error {
 				}
 			}
 			tokens := map[string]string{"sh_state": stateLine(th), "sh_rank": rank(classify(th), id)}
-			if err := t.herdr.ReportState(th.Agent.PaneID, tokens, ttl); err != nil {
-				t.log.Printf("sidebar %s: %v", id, err)
-			}
+			rows = append(rows, sidebarRow{Name: id, Pane: th.Agent.PaneID, Tokens: tokens})
 		}
 		st.Threads[id] = snap
 	}
+	if coord, ok := agents[t.cfg.CoordinatorName]; ok {
+		inbox, _ := readInbox()
+		tokens := map[string]string{"sh_rank": coordinatorRank, "sh_state": coordinatorLine(threads, len(inbox))}
+		rows = append(rows, sidebarRow{Name: t.cfg.CoordinatorName, Pane: coord.PaneID, Tokens: tokens})
+	}
+	// Set before leftActive clears departed panes, so a refresh can't bring
+	// their tokens back.
+	t.side.set(rows, time.Now())
 	for id, prev := range st.Threads {
 		if current[id] {
 			continue
 		}
 		t.leftActive(st, id, prev, agents, now)
-	}
-	if coord, ok := agents[t.cfg.CoordinatorName]; ok {
-		inbox, _ := readInbox()
-		tokens := map[string]string{"sh_rank": coordinatorRank, "sh_state": coordinatorLine(threads, len(inbox))}
-		if err := t.herdr.ReportState(coord.PaneID, tokens, ttl); err != nil {
-			t.log.Printf("sidebar %s: %v", t.cfg.CoordinatorName, err)
-		}
 	}
 	if verifyDue(t.cfg, *st, now) {
 		t.verify(st, now)
@@ -513,6 +544,9 @@ func tickerRun(cfg Config) error {
 	logger := log.New(f, "", log.LstdFlags)
 	logger.Printf("ticker %s started, every %s, on %s", version, cfg.tick(), cfg.coordSocket())
 	t := newTicker(cfg, logger)
+	done := make(chan struct{})
+	defer close(done)
+	go t.side.run(done)
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
 	timer := time.NewTicker(cfg.tick())

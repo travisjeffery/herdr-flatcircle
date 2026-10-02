@@ -97,7 +97,7 @@ func gitRun(dir string, args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
-// beadForBranch finds the closed bead a kelpie branch was cut for. A segment
+// beadForBranch finds the closed bead a flatcircle branch was cut for. A segment
 // of digits right after the id belongs to a sub-bead (backend-x.7 is
 // tj/backend-x-7-…), so it only counts when the branch is exactly the bead's.
 func beadForBranch(prefix, branch string, closed []Bead) (Bead, bool) {
@@ -321,7 +321,7 @@ func yesNo(b bool) string {
 	return "no"
 }
 
-// activeBeadFor names the active bead a branch belongs to: by kelpie's
+// activeBeadFor names the active bead a branch belongs to: by flatcircle's
 // branch naming or by the PR head the ticker recorded for it.
 func activeBeadFor(prefix, branch string, active []Bead, heads map[string]string) string {
 	if b, ok := beadForBranch(prefix, branch, active); ok {

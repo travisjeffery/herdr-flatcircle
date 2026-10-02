@@ -265,7 +265,7 @@ func TestRunSucceededPromptsNextStep(t *testing.T) {
 	if len(o.Events) != 1 || o.Events[0].Kind != EventRunSucceeded || o.Notify {
 		t.Fatalf("want one run_succeeded event and no notification, got %+v", o)
 	}
-	want := "[kelpie: automated, not the user] Deploy run https://github.com/acme/app/actions/runs/42 succeeded. Continue with the next step of the rollout."
+	want := "[flatcircle: automated, not the user] Deploy run https://github.com/acme/app/actions/runs/42 succeeded. Continue with the next step of the rollout."
 	if len(o.Prompts) != 1 || o.Prompts[0] != want {
 		t.Fatalf("got prompts %q", o.Prompts)
 	}
@@ -593,7 +593,8 @@ func TestQueuedReadyPromptDroppedWhenHeadMoves(t *testing.T) {
 	pushed := readyPR()
 	pushed.HeadSHA, pushed.MergeState = "bbb", "BLOCKED"
 	pushed.Checks = append(pushed.Checks, Check{Name: "e2e", Status: "IN_PROGRESS"})
-	prev.Pending = append(prev.Pending, "other prompt")
+	// One queued by the kelpie ticker, before the rename, is dropped too.
+	prev.Pending = append(prev.Pending, strings.Replace(o.Prompts[0], "[flatcircle:", "[kelpie:", 1), "other prompt")
 	s := snapshot(thread(bead(StatusInProgress), agent("working", 1), pushed), prev, t0.Add(2*time.Minute))
 	if !slices.Equal(s.Pending, []string{"other prompt"}) {
 		t.Fatalf("stale ready prompt kept: %+v", s.Pending)

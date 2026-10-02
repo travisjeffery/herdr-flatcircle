@@ -88,7 +88,7 @@ func staleClaims(bare []Bead, prs map[string]PR, now time.Time, age time.Duratio
 }
 
 // staleAge is when a bare claim counts as stale, in context and by default for
-// kelpie stale.
+// flatcircle stale.
 const staleAge = 7 * 24 * time.Hour
 
 func daysSince(t, now time.Time) int { return int(now.Sub(t).Hours() / 24) }
@@ -224,7 +224,7 @@ func resumeOne(cfg Config, h Herdr, r Resumable, kind string) (string, error) {
 			return "", fmt.Errorf("workspace %s has no pane without an agent", r.Worktree.WorkspaceID)
 		}
 	}
-	text := fmt.Sprintf("[kelpie] You were resumed after your agent exited. Run `bd show %s` and continue.", id)
+	text := fmt.Sprintf("[flatcircle] You were resumed after your agent exited. Run `bd show %s` and continue.", id)
 	if err := h.AgentStart(name, kind, pane, resumeArgs[kind]...); err != nil {
 		if !strings.Contains(err.Error(), "agent_not_ready") {
 			return "", fmt.Errorf("start %s in %s: %w", kind, pane, err)
@@ -232,7 +232,7 @@ func resumeOne(cfg Config, h Herdr, r Resumable, kind string) (string, error) {
 		if err := queueBrief(name, text); err != nil {
 			return "", err
 		}
-		h.Notify("kelpie: "+id+" is waiting for you", "Answer its startup prompt in "+pane+"; the resume prompt follows.")
+		h.Notify("flatcircle: "+id+" is waiting for you", "Answer its startup prompt in "+pane+"; the resume prompt follows.")
 		return fmt.Sprintf("resumed %s on %s (%s); it is at a startup prompt, the prompt is queued", kind, id, pane), nil
 	}
 	if err := h.Prompt(name, text); err != nil {
@@ -260,7 +260,7 @@ func stale(cfg Config, h Herdr, days int, release bool) ([]string, error) {
 	for _, b := range claims {
 		line := fmt.Sprintf("- %s untouched %dd: %s", b.ID, daysSince(b.UpdatedAt, now), shortTitle(b.Title, 70))
 		if release {
-			note := fmt.Sprintf("released by kelpie stale: no agent or worktree for %dd", days)
+			note := fmt.Sprintf("released by flatcircle stale: no agent or worktree for %dd", days)
 			if err := (Beads{}).Note(b.ID, note); err != nil {
 				errs = append(errs, err)
 				continue

@@ -466,9 +466,9 @@ func TestNeedlesFromX0w5(t *testing.T) {
 
 func TestRepoSlug(t *testing.T) {
 	for in, want := range map[string]string{
-		"git@github.com:Oscilar/backend.git":                "Oscilar/backend",
-		"https://github.com/travisjeffery/herdr-kelpie":     "travisjeffery/herdr-kelpie",
-		"https://github.com/travisjeffery/herdr-kelpie.git": "travisjeffery/herdr-kelpie",
+		"git@github.com:Oscilar/backend.git":                    "Oscilar/backend",
+		"https://github.com/travisjeffery/herdr-flatcircle":     "travisjeffery/herdr-flatcircle",
+		"https://github.com/travisjeffery/herdr-flatcircle.git": "travisjeffery/herdr-flatcircle",
 		"/local/path": "",
 	} {
 		if got := repoSlug(in); got != want {

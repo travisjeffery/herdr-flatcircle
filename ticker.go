@@ -352,7 +352,7 @@ func (t Ticker) leftActive(st *TickerState, id string, prev Snapshot, agents map
 				summary += "; " + res
 			}
 		} else {
-			summary += fmt.Sprintf("; run `kelpie resolve %s` to remove its worktree", id)
+			summary += fmt.Sprintf("; run `flatcircle resolve %s` to remove its worktree", id)
 		}
 		_ = writeEvent(Event{Bead: id, Kind: "closed", Summary: summary, At: now})
 	}
@@ -384,7 +384,7 @@ func (t Ticker) nudgeCoordinator(st *TickerState, agents map[string]Agent, now t
 	if fresh == 0 {
 		return
 	}
-	msg := fmt.Sprintf("[kelpie ticker: automated, not the user, approves nothing] %d new inbox item(s). Run `kelpie context`.", fresh)
+	msg := fmt.Sprintf("[flatcircle ticker: automated, not the user, approves nothing] %d new inbox item(s). Run `flatcircle context`.", fresh)
 	if err := t.herdr.Prompt(coord.PaneID, msg); err != nil {
 		t.log.Printf("nudge: %v", err)
 		return
@@ -400,17 +400,29 @@ func logPath() string { return filepath.Join(stateDir(), "ticker.log") }
 func socketFile() string { return filepath.Join(stateDir(), "ticker.socket") }
 
 // nameFile records which tool the running ticker is. A ticker without one is
-// a shepherd ticker from before the rename, still running the old binary.
+// a shepherd ticker, and one named kelpie a kelpie ticker, from before a
+// rename, still running the old binary.
 func nameFile() string { return filepath.Join(stateDir(), "ticker.name") }
 
-const tickerName = "kelpie"
+const tickerName = toolName
 
-// runningLegacy reports whether the running ticker predates kelpie: a state
-// dir migrated under a live shepherd ticker carries its pid and socket files
-// over, and that ticker would otherwise be kept as if it were current.
+// runningLegacy reports whether the running ticker predates flatcircle: a state
+// dir migrated under a live kelpie or shepherd ticker carries its pid and
+// socket files over, and that ticker would otherwise be kept as if it were
+// current.
 func runningLegacy() bool {
 	b, err := os.ReadFile(nameFile())
 	return err != nil || strings.TrimSpace(string(b)) != tickerName
+}
+
+// runningTool names the tool the running ticker is: shepherd's tickers
+// recorded no name.
+func runningTool() string {
+	b, err := os.ReadFile(nameFile())
+	if name := strings.TrimSpace(string(b)); err == nil && name != "" {
+		return name
+	}
+	return "shepherd"
 }
 
 // runningSocket is the socket the running ticker follows, "" if it is not
@@ -436,9 +448,9 @@ func socketWarning(ticker, configured, here string) string {
 	case ticker == "":
 		return ""
 	case here != "" && !sameSocket(ticker, here):
-		return fmt.Sprintf("the ticker follows the herdr server at %s, not this one (%s), so it sees none of the agents here; set herdr_socket = %q in %s and run `kelpie ticker start`", ticker, here, here, filepath.Join(configDir(), "config.toml"))
+		return fmt.Sprintf("the ticker follows the herdr server at %s, not this one (%s), so it sees none of the agents here; set herdr_socket = %q in %s and run `flatcircle ticker start`", ticker, here, here, filepath.Join(configDir(), "config.toml"))
 	case !sameSocket(ticker, configured):
-		return fmt.Sprintf("the ticker follows %s but herdr_socket is %s; run `kelpie ticker start` to move it", ticker, configured)
+		return fmt.Sprintf("the ticker follows %s but herdr_socket is %s; run `flatcircle ticker start` to move it", ticker, configured)
 	}
 	return ""
 }
@@ -455,7 +467,7 @@ func runningPID() int {
 	return pid
 }
 
-// isTicker reports whether pid is a `kelpie ticker run`, so a stale pid file
+// isTicker reports whether pid is a `flatcircle ticker run`, so a stale pid file
 // whose pid was reused never gets another process signalled. Without ps it
 // trusts the pid file.
 func isTicker(pid int) bool {
@@ -527,7 +539,7 @@ func tickerStart(cfg Config) error {
 		sock := runningSocket()
 		switch {
 		case runningLegacy():
-			fmt.Printf("ticker (pid %d) is shepherd's, from before the rename; restarting it as kelpie\n", pid)
+			fmt.Printf("ticker (pid %d) is %s's, from before the rename; restarting it as %s\n", pid, runningTool(), toolName)
 		case sock != "" && sameSocket(sock, cfg.coordSocket()):
 			fmt.Printf("ticker already running (pid %d)\n", pid)
 			return nil
@@ -585,7 +597,7 @@ func tickerStatus(cfg Config) {
 		}
 		fmt.Printf("ticker running (pid %d) on %s, log %s\n", pid, sock, logPath())
 		if runningLegacy() {
-			fmt.Println("warning: it is shepherd's ticker, from before the rename; run `kelpie ticker start` to restart it as kelpie")
+			fmt.Printf("warning: it is %s's ticker, from before the rename; run `%s ticker start` to restart it as %s\n", runningTool(), toolName, toolName)
 		}
 		if w := socketWarning(runningSocket(), cfg.coordSocket(), os.Getenv("HERDR_SOCKET_PATH")); w != "" {
 			fmt.Println("warning:", w)
@@ -681,16 +693,32 @@ func (t Ticker) fixNames(st *TickerState) {
 			wts[filepath.Clean(repo)] = list
 		}
 	}
+	coordinator := ""
+	for _, a := range list {
+		if a.Name == t.cfg.CoordinatorName {
+			coordinator = a.WorkspaceID
+		}
+	}
 	for _, r := range nameFixes(t.cfg, active, list, st.PRs, wts) {
 		if err := t.herdr.Rename(r.Pane, r.To); err != nil {
 			t.log.Printf("rename %s: %v", r.Pane, err)
 			continue
 		}
 		why := "it is the only agent in that bead's worktree"
-		if r.From == legacyName {
-			why = "the coordinator's name before the rename to kelpie"
+		if isLegacyName(r.From) && r.To == t.cfg.CoordinatorName {
+			why = "the coordinator's name before the rename to " + toolName
 			moveQueuedBrief(r.From, r.To)
+			for _, a := range list {
+				if a.PaneID == r.Pane {
+					coordinator = a.WorkspaceID
+				}
+			}
 		}
 		t.log.Printf("renamed %s from %q to %s: %s", r.Pane, r.From, r.To, why)
+	}
+	// The kelpie rename left the coordinator's workspace labelled with an old
+	// name; it follows the coordinator here.
+	if relabelCoordinatorWorkspace(t.herdr, coordinator) {
+		t.log.Printf("relabelled the coordinator's workspace %s to %s", coordinator, toolName)
 	}
 }

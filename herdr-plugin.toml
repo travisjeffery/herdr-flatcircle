@@ -1,6 +1,6 @@
-id = "kelpie"
-name = "Kelpie"
-version = "0.3.0"
+id = "flatcircle"
+name = "Flatcircle"
+version = "0.4.0"
 min_herdr_version = "0.9.1"
 description = "One coordinator, a worktree and agent per bead, beads as the only record."
 platforms = ["linux", "macos"]
@@ -9,42 +9,42 @@ platforms = ["linux", "macos"]
 command = ["sh", "scripts/build.sh"]
 
 [[startup]]
-command = ["bin/kelpie", "startup"]
+command = ["bin/flatcircle", "startup"]
 
 [[actions]]
 id = "configure"
-title = "Kelpie: set up (config for this workspace's repo, CLI link, agent view)"
+title = "Flatcircle: set up (config for this workspace's repo, CLI link, agent view)"
 contexts = ["workspace"]
-command = ["bin/kelpie", "configure"]
+command = ["bin/flatcircle", "configure"]
 
 [[actions]]
 id = "board"
-title = "Kelpie: board"
+title = "Flatcircle: board"
 contexts = ["global", "workspace"]
-command = ["bin/kelpie", "action", "board"]
+command = ["bin/flatcircle", "action", "board"]
 
 [[actions]]
 id = "coordinator"
-title = "Kelpie: open the coordinator"
+title = "Flatcircle: open the coordinator"
 contexts = ["global", "workspace"]
-command = ["bin/kelpie", "coordinator"]
+command = ["bin/flatcircle", "coordinator"]
 
 [[actions]]
 id = "focus-clipboard"
-title = "Kelpie: focus or start the bead on the clipboard"
+title = "Flatcircle: focus or start the bead on the clipboard"
 contexts = ["global", "workspace"]
-command = ["bin/kelpie", "focus"]
+command = ["bin/flatcircle", "focus"]
 
 [[actions]]
 id = "focus-clipboard-codex"
-title = "Kelpie: focus or start the bead on the clipboard (Codex)"
+title = "Flatcircle: focus or start the bead on the clipboard (Codex)"
 contexts = ["global", "workspace"]
-command = ["bin/kelpie", "focus", "--agent", "codex"]
+command = ["bin/flatcircle", "focus", "--agent", "codex"]
 
 [[panes]]
 id = "board"
-title = "Kelpie"
+title = "Flatcircle"
 placement = "popup"
 width = "85%"
 height = "80%"
-command = ["bin/kelpie", "board"]
+command = ["bin/flatcircle", "board"]

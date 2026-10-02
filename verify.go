@@ -384,7 +384,7 @@ func verifySearch(slug string, b Bead, key string) string {
 func applyVerdict(env verifyEnv, v verdict, now time.Time) error {
 	switch v.Action {
 	case "close":
-		reason := "kelpie verify: already done. " + v.summary()
+		reason := "flatcircle verify: already done. " + v.summary()
 		if err := env.close(v.Bead.ID, reason); err != nil {
 			return err
 		}

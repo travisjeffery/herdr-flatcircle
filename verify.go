@@ -221,10 +221,10 @@ func linearEvidence(key string, issues map[string]linearIssue) []evidence {
 }
 
 // prEvidence is (b): the bead links PRs, at least one merged and none still
-// open. A closed, unmerged PR doesn't count either way. It is strong only when
-// the bead doesn't say work remains after the merge.
+// open. It is strong only when every linked PR merged and the bead doesn't say
+// work remains after the merge; a closed, unmerged one leaves it a flag.
 func prEvidence(b Bead, urls []string, prs map[string]prRef) []evidence {
-	var merged []string
+	var merged, unmerged []string
 	for _, u := range urls {
 		pr, ok := prs[u]
 		if !ok {
@@ -235,13 +235,18 @@ func prEvidence(b Bead, urls []string, prs map[string]prRef) []evidence {
 			return nil
 		case "MERGED":
 			merged = append(merged, u)
+		default:
+			unmerged = append(unmerged, u)
 		}
 	}
 	if len(merged) == 0 {
 		return nil
 	}
 	e := evidence{Class: evPR, Strong: true, Detail: "merged " + strings.Join(merged, ", ")}
-	if why := workRemains(b); why != "" {
+	if len(unmerged) > 0 {
+		e.Strong = false
+		e.Detail += " (but closed unmerged: " + strings.Join(unmerged, ", ") + ")"
+	} else if why := workRemains(b); why != "" {
 		e.Strong = false
 		e.Detail += " (but " + why + ")"
 	}
@@ -677,9 +682,9 @@ func (w verifyWork) cost() int {
 		n++
 	}
 	if w.run {
-		n++
+		n++ // gh run list for a later pass
 		if w.full {
-			n++
+			n += len(NotedRuns(w.b.Notes)) // gh run view of each linked run
 		}
 	}
 	return n
@@ -904,6 +909,15 @@ func verifyPass(cfg Config, env verifyEnv, st *TickerState, ids []string, act bo
 			lines = append(lines, v.line())
 		}
 		m.Line = v.line()
+		if v.Action == "none" {
+			m.Acted = ""
+		}
+		if act && v.Action == "close" {
+			if why := stillClosable(env, w.b); why != "" {
+				lines = append(lines, fmt.Sprintf("verify %s: not closed: %s", w.b.ID, why))
+				continue
+			}
+		}
 		if act && v.Action != "none" && v.line() != m.Acted {
 			if err := applyVerdict(env, v, now); err != nil {
 				errs = append(errs, fmt.Errorf("%s: %w", w.b.ID, err))
@@ -945,6 +959,40 @@ func verifyPass(cfg Config, env verifyEnv, st *TickerState, ids []string, act bo
 }
 
 var errBudget = errors.New("GitHub budget too low")
+
+// stillClosable re-reads a bead just before it is closed, since a pass's
+// lookups take long enough for it to be claimed, noted, given a child or an
+// agent. "" if it may still be closed.
+func stillClosable(env verifyEnv, b Bead) string {
+	cur, err := env.show(b.ID)
+	switch {
+	case err != nil:
+		return "could not re-read it: " + err.Error()
+	case cur.Status != b.Status || !cur.UpdatedAt.Equal(b.UpdatedAt):
+		return "it changed during the pass"
+	}
+	agents, err := env.agents()
+	if err != nil {
+		return "could not list agents: " + err.Error()
+	}
+	if slices.ContainsFunc(agents, func(a Agent) bool { return a.Name == agentName(b.ID) }) {
+		return "an agent started on it during the pass"
+	}
+	all, err := env.beads()
+	if err != nil {
+		return "could not list beads: " + err.Error()
+	}
+	children := 0
+	for _, c := range all {
+		if c.Parent == b.ID {
+			children++
+		}
+	}
+	if why := closable(cur, children); why != "" {
+		return "now " + why
+	}
+	return ""
+}
 
 var evidenceOrder = []string{evLinear, evPR, evRefs, evGone, evDuplicate}
 
@@ -1010,10 +1058,11 @@ func updateGone(env verifyEnv, m *VerifyMark, w verifyWork, head string) ([]evid
 			return nil, err
 		}
 		m.Present, m.FailedRun = present, nil
-		for _, u := range NotedRuns(w.b.Notes + "\n" + w.b.Description) {
-			if r, err := env.runView(u); err == nil && runFailed(r) {
+		// The latest failure: a pass after an older one proves nothing while a
+		// later run still fails.
+		for _, u := range NotedRuns(w.b.Notes) {
+			if r, err := env.runView(u); err == nil && runFailed(r) && (m.FailedRun == nil || r.CreatedAt.After(m.FailedRun.CreatedAt)) {
 				m.FailedRun = &r
-				break
 			}
 		}
 	}

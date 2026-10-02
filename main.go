@@ -190,7 +190,9 @@ func run(args []string) error {
 		return err
 	case "verify":
 		st := loadState()
-		lines, err := verifyPass(cfg, liveVerifyEnv(cfg, h), &st, pos, *yes, time.Now())
+		// The ticker's server: a worker running elsewhere isn't seen otherwise,
+		// and its bead would look unattended.
+		lines, err := verifyPass(cfg, liveVerifyEnv(cfg, h.on(cfg.coordSocket())), &st, pos, *yes, time.Now())
 		fmt.Print(strings.Join(append(lines, ""), "\n"))
 		if *yes && !errors.Is(err, errBudget) {
 			if serr := saveState(st); serr != nil {

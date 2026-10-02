@@ -39,10 +39,13 @@ type fakeVerify struct {
 	merged  []prRef // every repo's search for newly merged PRs returns these
 	head    string
 	// code is what each rev holds, for grep.
-	code    map[string]string
-	runs    map[string]Run
-	later   *Run
-	agents  []Agent
+	code   map[string]string
+	runs   map[string]Run
+	later  *Run
+	agents []Agent
+	// reshow, if set, is what show returns once the pass has listed the beads.
+	reshow  func(Bead) Bead
+	shown   int
 	calls   map[string]int
 	closedN []string
 	events  []Event
@@ -61,6 +64,10 @@ func (f *fakeVerify) env() verifyEnv {
 			f.calls["show"]++
 			for _, b := range f.beads {
 				if b.ID == id {
+					f.shown++
+					if f.reshow != nil && f.shown > 1 {
+						return f.reshow(b), nil
+					}
 					return b, nil
 				}
 			}
@@ -570,5 +577,86 @@ func TestDuplicateIgnoresFamilySharingAKey(t *testing.T) {
 	other.ID, other.Parent = "backend-zzzz", ""
 	if ev := duplicateEvidence(b, "INF-1140", []Bead{other}, nil); len(ev) != 1 {
 		t.Fatalf("unrelated closed bead with INF-1140 is not a duplicate: %+v", ev)
+	}
+}
+
+func TestClosedUnmergedPRKeepsEvidenceWeak(t *testing.T) {
+	prs := map[string]prRef{pr14190: {URL: pr14190, State: "MERGED"}, pr14190 + "1": {URL: pr14190 + "1", State: "CLOSED"}}
+	ev := prEvidence(Bead{Title: "Fix it"}, []string{pr14190, pr14190 + "1"}, prs)
+	if len(ev) != 1 || ev[0].Strong || !strings.Contains(ev[0].Detail, "closed unmerged") {
+		t.Fatalf("evidence %+v, want weak naming the closed PR", ev)
+	}
+}
+
+func TestVerifyRevalidatesBeforeClosing(t *testing.T) {
+	for name, change := range map[string]func(*fakeVerify){
+		"noted":   func(f *fakeVerify) { f.reshow = func(b Bead) Bead { b.UpdatedAt = vNow; return b } },
+		"claimed": func(f *fakeVerify) { f.reshow = func(b Bead) Bead { b.Status = StatusInProgress; return b } },
+		"agent": func(f *fakeVerify) {
+			f.reshow = func(b Bead) Bead { f.agents = []Agent{{Name: "backend-x0w5"}}; return b }
+		},
+		"new child": func(f *fakeVerify) {
+			f.reshow = func(b Bead) Bead { f.beads = append(f.beads, Bead{ID: "backend-x0w5.1", Parent: b.ID}); return b }
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFake(withNote(x0w5(), "Linear: INF-994"))
+			f.issues["INF-994"] = linearIssue{Key: "INF-994", State: "completed", Name: "Done"}
+			change(f)
+			st := TickerState{}
+			lines := pass(t, f, vcfg(true), &st, vNow)
+			if len(f.closedN) != 0 || len(f.events) != 0 {
+				t.Fatalf("closed %v events %v after the bead changed", f.closedN, f.events)
+			}
+			if !strings.Contains(strings.Join(lines, "\n"), "not closed") {
+				t.Fatalf("lines = %q", lines)
+			}
+		})
+	}
+}
+
+func TestVerifyUsesLatestFailedRun(t *testing.T) {
+	a := "https://github.com/Oscilar/backend/actions/runs/1"
+	b := "https://github.com/Oscilar/backend/actions/runs/2"
+	c := "https://github.com/Oscilar/backend/actions/runs/3"
+	f := newFake(withNote(x0w5(), "runs: "+a+" "+b+" "+c))
+	f.code["then"], f.code["main2"] = "DescribeOrganization", ""
+	day := x0w5().CreatedAt
+	f.runs[a] = Run{URL: a, Workflow: "Preview", Conclusion: "failure", CreatedAt: day}
+	f.runs[b] = Run{URL: b, Workflow: "Preview", Conclusion: "success", CreatedAt: day.Add(time.Hour)}
+	f.runs[c] = Run{URL: c, Workflow: "Preview", Conclusion: "failure", CreatedAt: day.Add(2 * time.Hour)}
+	var asked []string
+	env := f.env()
+	env.laterPass = func(r Run) (Run, bool, error) {
+		asked = append(asked, r.URL)
+		return Run{}, false, nil
+	}
+	st := TickerState{}
+	if _, err := verifyPass(vcfg(true), env, &st, nil, true, vNow); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(asked, []string{c}) || len(f.closedN) != 0 {
+		t.Fatalf("asked for a pass after %q, closed %v; want only the latest failure %s", asked, f.closedN, c)
+	}
+}
+
+func TestVerifyReflagsEvidenceThatReturns(t *testing.T) {
+	f := newFake(withNote(x0w5(), "PR: "+pr14190))
+	f.prs[pr14190] = prRef{URL: pr14190, State: "MERGED", Head: "a"}
+	st := TickerState{}
+	pass(t, f, vcfg(false), &st, vNow)
+	f.prs[pr14190] = prRef{URL: pr14190, State: "OPEN", Head: "b"}
+	pass(t, f, vcfg(false), &st, vNow.Add(time.Hour))
+	f.prs[pr14190] = prRef{URL: pr14190, State: "MERGED", Head: "c"}
+	pass(t, f, vcfg(false), &st, vNow.Add(2*time.Hour))
+	if len(f.events) != 2 {
+		t.Fatalf("events = %+v, want the flag again once the evidence returned", f.events)
+	}
+}
+
+func TestVerifyChargesEveryRunLookup(t *testing.T) {
+	w := verifyWork{b: withNote(x0w5(), "https://github.com/o/r/actions/runs/1 https://github.com/o/r/actions/runs/2 https://github.com/o/r/actions/runs/3"), full: true, run: true}
+	if got := w.cost(); got != 5 {
+		t.Fatalf("cost = %d, want 5: a search, three run views and a run list", got)
 	}
 }

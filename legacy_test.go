@@ -8,11 +8,11 @@ import (
 )
 
 func TestRunningLegacy(t *testing.T) {
-	t.Setenv("KELPIE_STATE_DIR", t.TempDir())
+	t.Setenv("FLATCIRCLE_STATE_DIR", t.TempDir())
 	if !runningLegacy() {
 		t.Fatal("a ticker without ticker.name (shepherd's) was taken as current")
 	}
-	for name, legacy := range map[string]bool{"kelpie\n": false, "shepherd": true} {
+	for name, legacy := range map[string]bool{"flatcircle\n": false, "kelpie\n": true, "shepherd": true} {
 		if err := os.WriteFile(nameFile(), []byte(name), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -23,12 +23,12 @@ func TestRunningLegacy(t *testing.T) {
 }
 
 func TestMoveQueuedBrief(t *testing.T) {
-	t.Setenv("KELPIE_STATE_DIR", t.TempDir())
+	t.Setenv("FLATCIRCLE_STATE_DIR", t.TempDir())
 	if err := queueBrief("shepherd", "first prompt"); err != nil {
 		t.Fatal(err)
 	}
-	moveQueuedBrief("shepherd", "kelpie")
-	if got, _ := os.ReadFile(filepath.Join(outboxDir(), "kelpie.md")); string(got) != "first prompt" {
+	moveQueuedBrief("shepherd", "flatcircle")
+	if got, _ := os.ReadFile(filepath.Join(outboxDir(), "flatcircle.md")); string(got) != "first prompt" {
 		t.Fatalf("brief not moved: %q", got)
 	}
 	if _, err := os.Stat(filepath.Join(outboxDir(), "shepherd.md")); err == nil {
@@ -38,20 +38,50 @@ func TestMoveQueuedBrief(t *testing.T) {
 	if err := queueBrief("shepherd", "stale"); err != nil {
 		t.Fatal(err)
 	}
-	moveQueuedBrief("shepherd", "kelpie")
-	if got, _ := os.ReadFile(filepath.Join(outboxDir(), "kelpie.md")); string(got) != "first prompt" {
+	moveQueuedBrief("shepherd", "flatcircle")
+	if got, _ := os.ReadFile(filepath.Join(outboxDir(), "flatcircle.md")); string(got) != "first prompt" {
 		t.Fatalf("new brief overwritten: %q", got)
 	}
 }
 
+func TestRunningTool(t *testing.T) {
+	t.Setenv("FLATCIRCLE_STATE_DIR", t.TempDir())
+	if got := runningTool(); got != "shepherd" {
+		t.Fatalf("no ticker.name: %q", got)
+	}
+	if err := os.WriteFile(nameFile(), []byte("kelpie"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := runningTool(); got != "kelpie" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+// A kelpie coordinator is adopted before a shepherd one: kelpie is the newer
+// name, so a shepherd agent beside it is not the live coordinator.
+func TestLegacyCoordinatorPrefersKelpie(t *testing.T) {
+	cfg := Config{CoordinatorName: "flatcircle"}
+	agents := []Agent{{PaneID: "w1:p1", Name: "shepherd"}, {PaneID: "w2:p1", Name: "kelpie"}}
+	if a, ok := legacyCoordinator(cfg, agents); !ok || a.PaneID != "w2:p1" {
+		t.Fatalf("got %+v %v", a, ok)
+	}
+	if _, ok := legacyCoordinator(Config{CoordinatorName: "kelpie"}, agents); ok {
+		t.Fatal("coordinator_name = kelpie is not legacy")
+	}
+	fixes := nameFixes(cfg, nil, agents, nil, nil)
+	if len(fixes) != 1 || fixes[0] != (rename{Pane: "w2:p1", From: "kelpie", To: "flatcircle"}) {
+		t.Fatalf("name fixes %+v", fixes)
+	}
+}
+
 func TestLegacyCoordinator(t *testing.T) {
-	cfg := Config{CoordinatorName: "kelpie"}
+	cfg := Config{CoordinatorName: "flatcircle"}
 	old := Agent{PaneID: "w9:p1", Name: "shepherd"}
 	if a, ok := legacyCoordinator(cfg, []Agent{{Name: "backend-ab12"}, old}); !ok || a.PaneID != "w9:p1" {
 		t.Fatalf("got %+v %v", a, ok)
 	}
-	if _, ok := legacyCoordinator(cfg, []Agent{old, {Name: "kelpie"}}); ok {
-		t.Fatal("adopted shepherd with a kelpie coordinator present")
+	if _, ok := legacyCoordinator(cfg, []Agent{old, {Name: "flatcircle"}}); ok {
+		t.Fatal("adopted shepherd with a flatcircle coordinator present")
 	}
 	if _, ok := legacyCoordinator(Config{CoordinatorName: "shepherd"}, []Agent{old}); ok {
 		t.Fatal("coordinator_name = shepherd is not legacy")
@@ -62,7 +92,7 @@ func TestLegacyCoordinator(t *testing.T) {
 // starting a second one.
 func TestOpenCoordinatorAdoptsShepherd(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("KELPIE_STATE_DIR", dir)
+	t.Setenv("FLATCIRCLE_STATE_DIR", dir)
 	calls := filepath.Join(dir, "calls")
 	bin := filepath.Join(dir, "herdr")
 	script := `#!/bin/sh
@@ -78,19 +108,75 @@ esac
 	if err := queueBrief("shepherd", "first prompt"); err != nil {
 		t.Fatal(err)
 	}
-	msg, err := openCoordinator(Config{CoordinatorName: "kelpie", CoordinatorAgent: "claude"}, Herdr{bin: bin}, "")
+	msg, err := openCoordinator(Config{CoordinatorName: "flatcircle", CoordinatorAgent: "claude"}, Herdr{bin: bin}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(calls)
-	want := "agent list\nagent rename w9:p1 kelpie\nagent focus kelpie\n"
+	want := "agent list\nagent rename w9:p1 flatcircle\nagent focus flatcircle\n"
 	if string(got) != want {
 		t.Fatalf("herdr calls:\n%s\nwant:\n%s", got, want)
 	}
 	if !strings.Contains(msg, "renamed the shepherd coordinator") {
 		t.Errorf("message %q", msg)
 	}
-	if _, err := os.Stat(filepath.Join(outboxDir(), "kelpie.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(outboxDir(), "flatcircle.md")); err != nil {
 		t.Errorf("queued brief did not follow the rename: %v", err)
+	}
+}
+
+// fakeHerdrBin writes a herdr stand-in that logs its calls and answers agent
+// list with agents and workspace get with label.
+func fakeHerdrBin(t *testing.T, dir, agents, label string) (bin, calls string) {
+	calls = filepath.Join(dir, "calls")
+	bin = filepath.Join(dir, "herdr")
+	script := `#!/bin/sh
+echo "$*" >> ` + calls + `
+case "$1 $2" in
+"agent list") echo '{"result":{"agents":` + agents + `}}' ;;
+"workspace get") echo '{"result":{"workspace":{"label":"` + label + `"}}}' ;;
+*) echo '{"result":{}}' ;;
+esac
+`
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin, calls
+}
+
+// openCoordinator adopts a kelpie coordinator and relabels its workspace, which
+// the kelpie rename left under the old name.
+func TestOpenCoordinatorAdoptsKelpie(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FLATCIRCLE_STATE_DIR", dir)
+	bin, calls := fakeHerdrBin(t, dir, `[{"name":"kelpie","pane_id":"w7:p1","workspace_id":"w7"}]`, "kelpie")
+	msg, err := openCoordinator(Config{CoordinatorName: "flatcircle", CoordinatorAgent: "claude"}, Herdr{bin: bin}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(calls)
+	want := "agent list\nagent rename w7:p1 flatcircle\nworkspace get w7\nworkspace rename w7 flatcircle\nagent focus flatcircle\n"
+	if string(got) != want {
+		t.Fatalf("herdr calls:\n%s\nwant:\n%s", got, want)
+	}
+	if !strings.Contains(msg, "renamed the kelpie coordinator") {
+		t.Errorf("message %q", msg)
+	}
+}
+
+func TestRelabelCoordinatorWorkspace(t *testing.T) {
+	for label, renamed := range map[string]bool{"kelpie": true, "shepherd": true, "flatcircle": false, "my coordinator": false} {
+		dir := t.TempDir()
+		bin, calls := fakeHerdrBin(t, dir, `[]`, label)
+		if got := relabelCoordinatorWorkspace(Herdr{bin: bin}, "w7"); got != renamed {
+			t.Errorf("label %q: renamed = %v, want %v", label, got, renamed)
+		}
+		log, _ := os.ReadFile(calls)
+		if strings.Contains(string(log), "workspace rename") != renamed {
+			t.Errorf("label %q: calls %q", label, log)
+		}
+	}
+	if relabelCoordinatorWorkspace(Herdr{bin: "/nonexistent"}, "") {
+		t.Error("relabelled a coordinator with no workspace")
 	}
 }

@@ -14,7 +14,7 @@ import (
 
 // source tags every sidebar token this tool writes, so clearing ours never
 // touches another plugin's.
-const source = "kelpie"
+const source = toolName
 
 type Agent struct {
 	Name        string `json:"name"`
@@ -189,6 +189,25 @@ func (h Herdr) WorkspaceCreate(cwd, label string, focus bool) (Opened, error) {
 	return parseOpened(res)
 }
 
+// WorkspaceLabel is the label of a workspace.
+func (h Herdr) WorkspaceLabel(workspace string) (string, error) {
+	res, err := h.call(callTimeout, "workspace", "get", workspace)
+	if err != nil {
+		return "", err
+	}
+	var out struct {
+		Workspace struct {
+			Label string `json:"label"`
+		} `json:"workspace"`
+	}
+	return out.Workspace.Label, json.Unmarshal(res, &out)
+}
+
+func (h Herdr) WorkspaceRename(workspace, label string) error {
+	_, err := h.call(callTimeout, "workspace", "rename", workspace, label)
+	return err
+}
+
 func (h Herdr) TabRename(tab, label string) error {
 	_, err := h.call(callTimeout, "tab", "rename", tab, label)
 	return err
@@ -251,7 +270,7 @@ func (h Herdr) ReportState(pane string, tokens map[string]string, ttl time.Durat
 }
 
 func (h Herdr) ClearState(pane string) {
-	for _, src := range []string{source, legacyName} {
+	for _, src := range append([]string{source}, legacyNames...) {
 		_, _ = h.call(callTimeout, "pane", "report-metadata", pane, "--source", src, "--clear-token", "sh_state", "--clear-token", "sh_rank")
 	}
 }

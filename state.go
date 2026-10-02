@@ -270,13 +270,13 @@ func transition(t Thread, prev Snapshot, first bool, now time.Time) Outcome {
 		if len(t.Checks.Failing) > 0 && !slices.Equal(t.Checks.Failing, prev.Failing) {
 			ev(EventFailing, "PR #%d checks failing: %s", t.PR.Number, strings.Join(t.Checks.Failing, ", "))
 			o.Prompts = append(o.Prompts, fmt.Sprintf(
-				"[kelpie: automated, not the user] PR #%d has failing checks: %s. Investigate with `gh pr checks %d`, fix them on this branch, and push.",
+				"[flatcircle: automated, not the user] PR #%d has failing checks: %s. Investigate with `gh pr checks %d`, fix them on this branch, and push.",
 				t.PR.Number, strings.Join(t.Checks.Failing, ", "), t.PR.Number))
 		}
 		review := func(what string) {
 			ev(EventReview, "PR #%d has %s", t.PR.Number, what)
 			o.Prompts = append(o.Prompts, fmt.Sprintf(
-				"[kelpie: automated, not the user] PR #%d has %s. Read it with `gh pr view %d --comments` and the review threads; fix what is valid, reply to what is not, and push.",
+				"[flatcircle: automated, not the user] PR #%d has %s. Read it with `gh pr view %d --comments` and the review threads; fix what is valid, reply to what is not, and push.",
 				t.PR.Number, what, t.PR.Number))
 		}
 		// Snapshots from before bots were told apart counted them as human
@@ -302,11 +302,11 @@ func transition(t Thread, prev Snapshot, first bool, now time.Time) Outcome {
 		ev(EventMerged, "PR #%d merged", t.PR.Number)
 		if t.Bead.HasLabel(LabelRollingOut) {
 			o.Prompts = append(o.Prompts, fmt.Sprintf(
-				"[kelpie: automated, not the user] PR #%d merged. Continue the rollout with its next step. When the rollout is finished and verified, remove the label with `bd label remove %s %s`, then close the bead with `bd close %s --reason \"<what shipped and how it was verified>\"`.",
+				"[flatcircle: automated, not the user] PR #%d merged. Continue the rollout with its next step. When the rollout is finished and verified, remove the label with `bd label remove %s %s`, then close the bead with `bd close %s --reason \"<what shipped and how it was verified>\"`.",
 				t.PR.Number, id, LabelRollingOut, id))
 		} else if t.Bead.Status != StatusClosed {
 			o.Prompts = append(o.Prompts, fmt.Sprintf(
-				"[kelpie: automated, not the user] PR #%d merged. Verify what needs verifying after merge, then close the bead with `bd close %s --reason \"<what shipped and how it was verified>\"` and stop.",
+				"[flatcircle: automated, not the user] PR #%d merged. Verify what needs verifying after merge, then close the bead with `bd close %s --reason \"<what shipped and how it was verified>\"` and stop.",
 				t.PR.Number, id))
 		}
 	}
@@ -315,12 +315,12 @@ func transition(t Thread, prev Snapshot, first bool, now time.Time) Outcome {
 		case r.Conclusion == "success":
 			ev(EventRunSucceeded, "%s run %d succeeded", r.Workflow, r.ID)
 			o.Prompts = append(o.Prompts, fmt.Sprintf(
-				"[kelpie: automated, not the user] %s run %s succeeded. Continue with the next step of the rollout.", r.Workflow, r.URL))
+				"[flatcircle: automated, not the user] %s run %s succeeded. Continue with the next step of the rollout.", r.Workflow, r.URL))
 		case runFailed(r):
 			o.Notify = true
 			ev(EventRunFailed, "%s run %d ended %s", r.Workflow, r.ID, r.Conclusion)
 			o.Prompts = append(o.Prompts, fmt.Sprintf(
-				"[kelpie: automated, not the user] %s run %s ended %s. Investigate with `gh run view %d -R %s --log-failed`, fix what is wrong, and carry on with the rollout.",
+				"[flatcircle: automated, not the user] %s run %s ended %s. Investigate with `gh run view %d -R %s --log-failed`, fix what is wrong, and carry on with the rollout.",
 				r.Workflow, r.URL, r.Conclusion, r.ID, r.Repo))
 		}
 	}
@@ -336,7 +336,18 @@ func transition(t Thread, prev Snapshot, first bool, now time.Time) Outcome {
 	return o
 }
 
-const readyPrompt = "[kelpie: automated, not the user] PR #"
+const readyPrompt = "[" + toolName + ": automated, not the user] PR #"
+
+// cutReadyPrompt is the rest of a ready-to-merge prompt after its prefix. A
+// prompt queued under an old name, before the rename, counts too.
+func cutReadyPrompt(p string) (string, bool) {
+	for _, n := range append([]string{toolName}, legacyNames...) {
+		if rest, ok := strings.CutPrefix(p, "["+n+": automated, not the user] PR #"); ok && strings.Contains(rest, " is ready to merge at ") {
+			return rest, true
+		}
+	}
+	return "", false
+}
 
 // readyKey names the PR and head commit a thread is ready to merge at, or ""
 // when it isn't ready.
@@ -353,7 +364,7 @@ func readyKey(t Thread) string {
 func freshPending(t Thread, pending []string) []string {
 	var keep []string
 	for _, p := range pending {
-		if rest, ok := strings.CutPrefix(p, readyPrompt); ok && strings.Contains(rest, " is ready to merge at ") {
+		if rest, ok := cutReadyPrompt(p); ok {
 			k := readyKey(t)
 			if k == "" || !strings.HasPrefix(rest, strings.Replace(k, "@", " is ready to merge at ", 1)+":") {
 				continue

@@ -17,9 +17,9 @@ var validKinds = map[string]bool{"claude": true, "codex": true}
 // task, bd prime (SessionStart hook) holds the workflow and memories.
 func brief(b Bead, branch, path, linear, instructions string) string {
 	var s strings.Builder
-	fmt.Fprintf(&s, "You are the kelpie worker for bead %s: %s\n", b.ID, b.Title)
+	fmt.Fprintf(&s, "You are the flatcircle worker for bead %s: %s\n", b.ID, b.Title)
 	fmt.Fprintf(&s, "It is already claimed for you. Worktree %s on branch %s. Start with `bd show %s`.\n\n", path, branch, b.ID)
-	s.WriteString(`How this thread reports (the kelpie ticker and coordinator read these, not your chat):
+	s.WriteString(`How this thread reports (the flatcircle ticker and coordinator read these, not your chat):
 - Keep the bead current with ` + "`bd note`" + `: findings, decisions, blockers.
 - When you open a PR, ` + "`bd note " + b.ID + " \"PR: <url>\"`" + ` so the ticker follows it. It will prompt you when checks fail, review feedback lands, or it merges.
 - If you need a human decision: put the exact question and options in a note, run ` + "`bd update " + b.ID + " --status needs_me`" + `, and stop. When the user answers you, directly in this pane or otherwise, run ` + "`bd update " + b.ID + " --status in_progress`" + ` first.
@@ -102,7 +102,7 @@ func dispatch(cfg Config, h Herdr, id string, o DispatchOpts) (string, error) {
 		if err := queueBrief(name, text); err != nil {
 			return "", err
 		}
-		h.Notify("kelpie: "+id+" is waiting for you", "Answer its startup prompt (folder trust?) in "+opened.PaneID+"; the brief follows.")
+		h.Notify("flatcircle: "+id+" is waiting for you", "Answer its startup prompt (folder trust?) in "+opened.PaneID+"; the brief follows.")
 		return fmt.Sprintf("started %s on %s (%s, branch %s); it is at a startup prompt, the brief is queued", kind, id, opened.PaneID, branch), nil
 	}
 	if err := h.Prompt(name, text); err != nil {
@@ -195,17 +195,19 @@ func openCoordinator(cfg Config, h Herdr, kind string) (string, error) {
 	if agents, err := h.Agents(); err == nil {
 		for _, a := range agents {
 			if a.Name == cfg.CoordinatorName {
+				relabelCoordinatorWorkspace(h, a.WorkspaceID)
 				return "focused the coordinator", h.Focus(a.Name)
 			}
 		}
-		// A coordinator still named shepherd is this one; renaming it here
-		// keeps a second coordinator from starting before the ticker does.
+		// A coordinator still named kelpie or shepherd is this one; renaming it
+		// here keeps a second coordinator from starting before the ticker does.
 		if a, ok := legacyCoordinator(cfg, agents); ok {
 			if err := h.Rename(a.PaneID, cfg.CoordinatorName); err != nil {
 				return "", err
 			}
 			moveQueuedBrief(a.Name, cfg.CoordinatorName)
-			return "renamed the shepherd coordinator to " + cfg.CoordinatorName + " and focused it", h.Focus(cfg.CoordinatorName)
+			relabelCoordinatorWorkspace(h, a.WorkspaceID)
+			return "renamed the " + a.Name + " coordinator to " + cfg.CoordinatorName + " and focused it", h.Focus(cfg.CoordinatorName)
 		}
 	}
 	if kind == "" {
@@ -223,12 +225,12 @@ func openCoordinator(cfg Config, h Herdr, kind string) (string, error) {
 			return "", err
 		}
 	}
-	opened, err := h.WorkspaceCreate(home, "kelpie", true)
+	opened, err := h.WorkspaceCreate(home, toolName, true)
 	if err != nil {
 		return "", err
 	}
 	_ = tickerStart(cfg)
-	first := "Run `kelpie context` and give me a short status: what needs me, what's in review, what's ready to start."
+	first := "Run `flatcircle context` and give me a short status: what needs me, what's in review, what's ready to start."
 	if err := h.AgentStart(cfg.CoordinatorName, kind, opened.PaneID); err != nil {
 		if !strings.Contains(err.Error(), "agent_not_ready") {
 			return "", err
@@ -236,13 +238,27 @@ func openCoordinator(cfg Config, h Herdr, kind string) (string, error) {
 		if err := queueBrief(cfg.CoordinatorName, first); err != nil {
 			return "", err
 		}
-		h.Notify("kelpie: coordinator is waiting for you", "Answer its startup prompt (folder trust?); its first prompt follows.")
+		h.Notify("flatcircle: coordinator is waiting for you", "Answer its startup prompt (folder trust?); its first prompt follows.")
 		return "started the coordinator in " + opened.PaneID + "; it is at a startup prompt", nil
 	}
 	if err := h.Prompt(cfg.CoordinatorName, first); err != nil {
 		return "", err
 	}
 	return "started the coordinator in " + opened.PaneID, nil
+}
+
+// relabelCoordinatorWorkspace renames the coordinator's workspace, created
+// with the tool's name as its label, from an old name to the current one. A
+// label set by hand is left alone. It reports whether it renamed it.
+func relabelCoordinatorWorkspace(h Herdr, workspace string) bool {
+	if workspace == "" {
+		return false
+	}
+	label, err := h.WorkspaceLabel(workspace)
+	if err != nil || !isLegacyName(label) {
+		return false
+	}
+	return h.WorkspaceRename(workspace, toolName) == nil
 }
 
 // The outbox holds briefs for agents that were not ready when dispatched, one

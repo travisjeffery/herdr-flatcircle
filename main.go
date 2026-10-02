@@ -15,39 +15,40 @@ import (
 // version is set from the release tag at build time.
 var version = "dev"
 
-const usage = `kelpie — one coordinator, a worktree and agent per bead, beads as the only record.
+const usage = `flatcircle — one coordinator, a worktree and agent per bead, beads as the only record.
 
 Usage:
-  kelpie coordinator [--agent claude|codex]  open (or focus) the coordinator agent
-  kelpie dispatch <bead> [--agent K] [--focus]  start a worker on a bead in its own worktree
-  kelpie focus [<bead>] [--agent K]           focus the bead's worker, else dispatch it
-                                            (no bead: read it from the clipboard)
-  kelpie context                              the coordinator's per-turn digest
-  kelpie report [--since 24h|7d|YYYY-MM-DD]   Markdown of what shipped, merged, is in flight, needs you
-  kelpie inbox done [<bead>...]               mark inbox items handled (all if none given)
-  kelpie resolve <bead> [--force]             remove a finished bead's worktree and merged branch
-  kelpie sweep [--yes]                        list finished linked worktrees; --yes removes the safe ones
-  kelpie resume [<bead>...] [--agent K]       restart exited agents in their worktrees, continuing
-                                                their last conversation (all resumable if none given)
-  kelpie stale [--days N] [--release]         claims with no agent or worktree untouched N days
-                                            (default 7); --release reopens them
-  kelpie verify [<bead>...] [--yes]           stale beads with evidence they are already done; --yes
-                                            closes (with auto_close) or flags them like the ticker
-  kelpie board                                the board (runs as the plugin popup)
-  kelpie ticker run|start|stop|status         the background loop: sidebar, PR follow-up, nudges
-  kelpie tick                                 one ticker pass in the foreground
-  kelpie configure [--repo PATH]              first-time setup: config, ~/.local/bin link, agent view
-  kelpie unconfigure                          stop the ticker, remove the view and sidebar tokens
-  kelpie version
+  flatcircle coordinator [--agent claude|codex]     open (or focus) the coordinator agent
+  flatcircle dispatch <bead> [--agent K] [--focus]  start a worker on a bead in its own worktree
+  flatcircle focus [<bead>] [--agent K]             focus the bead's worker, else dispatch it
+                                                    (no bead: read it from the clipboard)
+  flatcircle context                                the coordinator's per-turn digest
+  flatcircle report [--since 24h|7d|YYYY-MM-DD]     Markdown of what shipped, merged, is in flight, needs you
+  flatcircle inbox done [<bead>...]                 mark inbox items handled (all if none given)
+  flatcircle resolve <bead> [--force]               remove a finished bead's worktree and merged branch
+  flatcircle sweep [--yes]                          list finished linked worktrees; --yes removes the safe ones
+  flatcircle resume [<bead>...] [--agent K]         restart exited agents in their worktrees, continuing
+                                                    their last conversation (all resumable if none given)
+  flatcircle stale [--days N] [--release]           claims with no agent or worktree untouched N days
+                                                    (default 7); --release reopens them
+  flatcircle verify [<bead>...] [--yes]             stale beads with evidence they are already done; --yes
+                                                    closes (with auto_close) or flags them like the ticker
+  flatcircle board                                  the board (runs as the plugin popup)
+  flatcircle ticker run|start|stop|status           the background loop: sidebar, PR follow-up, nudges
+  flatcircle tick                                   one ticker pass in the foreground
+  flatcircle configure [--repo PATH]                first-time setup: config, ~/.local/bin link, agent view
+  flatcircle unconfigure                            stop the ticker, remove the view and sidebar tokens
+  flatcircle version
 `
 
 func main() {
-	// shepherd is the old name, kept as a deprecated alias for the transition.
-	if filepath.Base(os.Args[0]) == legacyName {
-		fmt.Fprintln(os.Stderr, "shepherd is now kelpie; the shepherd name is deprecated and will be removed")
+	// kelpie and shepherd are old names, kept as deprecated aliases for the
+	// transition.
+	if name := filepath.Base(os.Args[0]); isLegacyName(name) {
+		fmt.Fprintf(os.Stderr, "%s is now %s; the %s name is deprecated and will be removed\n", name, toolName, name)
 	}
 	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "kelpie:", err)
+		fmt.Fprintln(os.Stderr, "flatcircle:", err)
 		os.Exit(1)
 	}
 }
@@ -75,7 +76,7 @@ func run(args []string) error {
 	}
 	if !slices.Contains([]string{"version", "--version", "-V", "help", "--help", "-h"}, args[0]) {
 		for _, msg := range migrateDirs() {
-			fmt.Fprintln(os.Stderr, "kelpie:", msg)
+			fmt.Fprintln(os.Stderr, "flatcircle:", msg)
 		}
 	}
 	cfg, err := loadConfig()
@@ -88,7 +89,7 @@ func run(args []string) error {
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	kind := fs.String("agent", "", "agent kind: claude or codex")
 	focus := fs.Bool("focus", false, "focus the new workspace")
-	repoFlag := fs.String("repo", "", "configure: the repository kelpie works in, written to config.toml if it has none")
+	repoFlag := fs.String("repo", "", "configure: the repository flatcircle works in, written to config.toml if it has none")
 	force := fs.Bool("force", false, "resolve even if the bead is open or its agent is working")
 	sinceFlag := fs.String("since", "24h", "report window: Nh, Nd or YYYY-MM-DD")
 	yes := fs.Bool("yes", false, "sweep: remove the clean candidates; verify: act on the verdicts")
@@ -100,19 +101,19 @@ func run(args []string) error {
 	}
 	switch cmd {
 	case "version", "--version", "-V":
-		fmt.Println("kelpie", version)
+		fmt.Println("flatcircle", version)
 	case "help", "--help", "-h":
 		fmt.Print(usage)
 	case "coordinator":
 		msg, err := openCoordinator(cfg, h, *kind)
 		if err != nil {
-			h.Notify("kelpie: coordinator failed", err.Error())
+			h.Notify("flatcircle: coordinator failed", err.Error())
 			return err
 		}
 		fmt.Println(msg)
 	case "dispatch":
 		if len(pos) != 1 {
-			return fmt.Errorf("usage: kelpie dispatch <bead> [--agent claude|codex] [--focus]")
+			return fmt.Errorf("usage: flatcircle dispatch <bead> [--agent claude|codex] [--focus]")
 		}
 		msg, err := dispatch(cfg, h, pos[0], DispatchOpts{Kind: *kind, Focus: *focus})
 		if err != nil {
@@ -124,15 +125,15 @@ func run(args []string) error {
 		if len(pos) > 0 {
 			id = pos[0]
 		} else if id, err = clipboardBead(); err != nil {
-			h.Notify("kelpie: no bead", err.Error())
+			h.Notify("flatcircle: no bead", err.Error())
 			return err
 		}
 		msg, err := dispatch(cfg, h, id, DispatchOpts{Kind: *kind, Focus: true})
 		if err != nil {
-			h.Notify("kelpie: "+id, err.Error())
+			h.Notify("flatcircle: "+id, err.Error())
 			return err
 		}
-		h.Notify("kelpie: "+id, msg)
+		h.Notify("flatcircle: "+id, msg)
 		fmt.Println(msg)
 	case "context":
 		st := loadState()
@@ -162,7 +163,7 @@ func run(args []string) error {
 		fmt.Print(renderReport(r, now))
 	case "inbox":
 		if len(pos) == 0 || pos[0] != "done" {
-			return fmt.Errorf("usage: kelpie inbox done [<bead>...]")
+			return fmt.Errorf("usage: flatcircle inbox done [<bead>...]")
 		}
 		n, err := inboxDone(pos[1:])
 		if err != nil {
@@ -171,7 +172,7 @@ func run(args []string) error {
 		fmt.Printf("%d item(s) marked done\n", n)
 	case "resolve":
 		if len(pos) != 1 {
-			return fmt.Errorf("usage: kelpie resolve <bead> [--force]")
+			return fmt.Errorf("usage: flatcircle resolve <bead> [--force]")
 		}
 		msg, err := resolve(cfg, h, pos[0], *force)
 		if err != nil {
@@ -205,12 +206,12 @@ func run(args []string) error {
 	case "action":
 		// Plugin actions: open one of this plugin's panes.
 		if len(pos) != 1 {
-			return fmt.Errorf("usage: kelpie action board")
+			return fmt.Errorf("usage: flatcircle action board")
 		}
 		return h.OpenPane(pos[0])
 	case "ticker":
 		if len(pos) != 1 {
-			return fmt.Errorf("usage: kelpie ticker run|start|stop|status")
+			return fmt.Errorf("usage: flatcircle ticker run|start|stop|status")
 		}
 		switch pos[0] {
 		case "run":
@@ -235,7 +236,7 @@ func run(args []string) error {
 		// Herdr runs this when the plugin loads. Views don't survive a server
 		// restart, so the view is set again here.
 		if err := setView(socketRPC{herdrSocket()}); err != nil {
-			fmt.Fprintln(os.Stderr, "kelpie: agent view:", err)
+			fmt.Fprintln(os.Stderr, "flatcircle: agent view:", err)
 		}
 		return tickerStart(cfg)
 	case "configure":
@@ -244,9 +245,9 @@ func run(args []string) error {
 		// Run as a plugin action, stdout only reaches herdr's plugin log.
 		if os.Getenv("HERDR_PLUGIN_CONTEXT_JSON") != "" {
 			if err != nil {
-				h.Notify("kelpie: setup failed", err.Error())
+				h.Notify("flatcircle: setup failed", err.Error())
 			} else {
-				h.Notify("kelpie: set up", strings.Join(lines, "\n"))
+				h.Notify("flatcircle: set up", strings.Join(lines, "\n"))
 			}
 		}
 		return err

@@ -9,7 +9,7 @@ import (
 
 func TestMigrateDirMovesAndLinks(t *testing.T) {
 	root := t.TempDir()
-	legacy, dir := filepath.Join(root, "shepherd"), filepath.Join(root, "kelpie")
+	legacy, dir := filepath.Join(root, "shepherd"), filepath.Join(root, "flatcircle")
 	if err := os.MkdirAll(filepath.Join(legacy, "inbox"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func TestMigrateDirMovesAndLinks(t *testing.T) {
 
 func TestMigrateDirLeavesBothWhenNewExists(t *testing.T) {
 	root := t.TempDir()
-	legacy, dir := filepath.Join(root, "shepherd"), filepath.Join(root, "kelpie")
+	legacy, dir := filepath.Join(root, "shepherd"), filepath.Join(root, "flatcircle")
 	for _, d := range []string{legacy, dir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
@@ -60,10 +60,8 @@ func TestStateDirReadsTheLegacyPathUntilMigrated(t *testing.T) {
 	t.Setenv("HOME", home)
 	// migrateDirs moves the config dir too, found through XDG_CONFIG_HOME.
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	t.Setenv("KELPIE_STATE_DIR", "")
-	t.Setenv("SHEPHERD_STATE_DIR", "")
 	base := filepath.Join(home, ".local", "state")
-	if got, want := stateDir(), filepath.Join(base, "kelpie"); got != want {
+	if got, want := stateDir(), filepath.Join(base, "flatcircle"); got != want {
 		t.Fatalf("fresh install: got %s, want %s", got, want)
 	}
 	if err := os.MkdirAll(filepath.Join(base, "shepherd"), 0o755); err != nil {
@@ -73,11 +71,67 @@ func TestStateDirReadsTheLegacyPathUntilMigrated(t *testing.T) {
 		t.Fatalf("only the legacy dir: got %s, want %s", got, want)
 	}
 	migrateDirs()
-	if got, want := stateDir(), filepath.Join(base, "kelpie"); got != want {
+	if got, want := stateDir(), filepath.Join(base, "flatcircle"); got != want {
 		t.Fatalf("after migrating: got %s, want %s", got, want)
 	}
 	t.Setenv("SHEPHERD_STATE_DIR", "/legacy/env")
 	if got := stateDir(); got != "/legacy/env" {
 		t.Fatalf("SHEPHERD_STATE_DIR ignored: %s", got)
+	}
+}
+
+// The kelpie migration left kelpie as the real dir and shepherd linked to it.
+// Migrating to flatcircle moves kelpie, and both old paths still reach the same
+// inbox, for a kelpie or shepherd ticker still running.
+func TestMigrateDirsFromKelpie(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	item := filepath.Join("inbox", "1-backend-x-finished.json")
+	for _, base := range []string{filepath.Join(home, ".config"), filepath.Join(home, ".local", "state")} {
+		if err := os.MkdirAll(filepath.Join(base, "kelpie", "inbox"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(base, "kelpie", item), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(base, "kelpie"), filepath.Join(base, "shepherd")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, want := stateDir(), filepath.Join(home, ".local", "state", "kelpie"); got != want {
+		t.Fatalf("before migrating: got %s, want %s", got, want)
+	}
+	if msgs := migrateDirs(); len(msgs) != 2 {
+		t.Fatalf("want one move each for config and state, got %q", msgs)
+	}
+	if got, want := configDir(), filepath.Join(home, ".config", "flatcircle"); got != want {
+		t.Fatalf("config dir: got %s, want %s", got, want)
+	}
+	if got, want := stateDir(), filepath.Join(home, ".local", "state", "flatcircle"); got != want {
+		t.Fatalf("state dir: got %s, want %s", got, want)
+	}
+	for _, old := range []string{"kelpie", "shepherd"} {
+		p := filepath.Join(home, ".local", "state", old)
+		if fi, err := os.Lstat(p); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("%s is not a link: %v", p, err)
+		}
+		if _, err := os.Stat(filepath.Join(p, item)); err != nil {
+			t.Fatalf("%s no longer reaches the inbox: %v", old, err)
+		}
+	}
+	if msgs := migrateDirs(); len(msgs) != 0 {
+		t.Fatalf("second run is not a no-op: %q", msgs)
+	}
+}
+
+func TestStateDirEnvNames(t *testing.T) {
+	t.Setenv("KELPIE_STATE_DIR", "/kelpie/env")
+	if got := stateDir(); got != "/kelpie/env" {
+		t.Fatalf("KELPIE_STATE_DIR ignored: %s", got)
+	}
+	t.Setenv("FLATCIRCLE_STATE_DIR", "/flatcircle/env")
+	if got := stateDir(); got != "/flatcircle/env" {
+		t.Fatalf("FLATCIRCLE_STATE_DIR does not win: %s", got)
 	}
 }

@@ -63,7 +63,7 @@ func defaultConfig() Config {
 		BaseBranch:       "main",
 		WorkerAgent:      "claude",
 		CoordinatorAgent: "claude",
-		CoordinatorName:  "kelpie",
+		CoordinatorName:  toolName,
 		TickSeconds:      15,
 		GHSeconds:        60,
 		IdleSeconds:      60,
@@ -75,24 +75,48 @@ func defaultConfig() Config {
 	}
 }
 
-// The tool was called shepherd; its config and state lived under that name.
-const legacyName = "shepherd"
+// toolName names the binary, the config and state dirs, the ticker and the
+// coordinator. The tool was called kelpie, and shepherd before that; those
+// names, newest first, are deprecated aliases and the places old config and
+// state are migrated from.
+const toolName = "flatcircle"
+
+var legacyNames = []string{"kelpie", "shepherd"}
+
+func isLegacyName(name string) bool { return slices.Contains(legacyNames, name) }
+
+// envNames is the variable named after this tool and after each old name, so
+// FLATCIRCLE_STATE_DIR, KELPIE_STATE_DIR and SHEPHERD_STATE_DIR all work.
+func envNames(suffix string) []string {
+	out := []string{strings.ToUpper(toolName) + "_" + suffix}
+	for _, n := range legacyNames {
+		out = append(out, strings.ToUpper(n)+"_"+suffix)
+	}
+	return out
+}
+
+func configBase() string {
+	d, _ := os.UserConfigDir()
+	return d
+}
+
+func stateBase() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".local", "state")
+}
 
 func configDir() string {
-	if d := envDir("KELPIE_CONFIG_DIR", "SHEPHERD_CONFIG_DIR"); d != "" {
+	if d := envDir(envNames("CONFIG_DIR")...); d != "" {
 		return d
 	}
-	d, _ := os.UserConfigDir()
-	return pickDir(filepath.Join(d, "kelpie"), filepath.Join(d, legacyName))
+	return pickDir(configBase())
 }
 
 func stateDir() string {
-	if d := envDir("KELPIE_STATE_DIR", "SHEPHERD_STATE_DIR"); d != "" {
+	if d := envDir(envNames("STATE_DIR")...); d != "" {
 		return d
 	}
-	home, _ := os.UserHomeDir()
-	base := filepath.Join(home, ".local", "state")
-	return pickDir(filepath.Join(base, "kelpie"), filepath.Join(base, legacyName))
+	return pickDir(stateBase())
 }
 
 func envDir(keys ...string) string {
@@ -104,29 +128,33 @@ func envDir(keys ...string) string {
 	return ""
 }
 
-// pickDir is dir, or the legacy dir while only that one exists (a migration
-// that could not move it).
-func pickDir(dir, legacy string) string {
+// pickDir is base/flatcircle, or the newest legacy dir under base while only
+// that one exists (a migration that could not move it).
+func pickDir(base string) string {
+	dir := filepath.Join(base, toolName)
 	if _, err := os.Stat(dir); err != nil {
-		if fi, err := os.Stat(legacy); err == nil && fi.IsDir() {
-			return legacy
+		for _, n := range legacyNames {
+			if fi, err := os.Stat(filepath.Join(base, n)); err == nil && fi.IsDir() {
+				return filepath.Join(base, n)
+			}
 		}
 	}
 	return dir
 }
 
-// migrateDirs moves shepherd's config and state to kelpie's paths. Directories
-// set through the environment are left where they are.
+// migrateDirs moves kelpie's or shepherd's config and state to flatcircle's
+// paths. Directories set through the environment are left where they are. A
+// shepherd link left by the kelpie migration keeps working through the kelpie
+// link this one leaves.
 func migrateDirs() []string {
 	var out []string
-	if envDir("KELPIE_CONFIG_DIR", "SHEPHERD_CONFIG_DIR") == "" {
-		d, _ := os.UserConfigDir()
-		out = append(out, migrateDir(filepath.Join(d, legacyName), filepath.Join(d, "kelpie"))...)
-	}
-	if envDir("KELPIE_STATE_DIR", "SHEPHERD_STATE_DIR") == "" {
-		home, _ := os.UserHomeDir()
-		base := filepath.Join(home, ".local", "state")
-		out = append(out, migrateDir(filepath.Join(base, legacyName), filepath.Join(base, "kelpie"))...)
+	for _, d := range []struct{ env, base string }{{"CONFIG_DIR", configBase()}, {"STATE_DIR", stateBase()}} {
+		if envDir(envNames(d.env)...) != "" {
+			continue
+		}
+		for _, n := range legacyNames {
+			out = append(out, migrateDir(filepath.Join(d.base, n), filepath.Join(d.base, toolName))...)
+		}
 	}
 	return out
 }
@@ -178,7 +206,7 @@ func loadConfig() (Config, error) {
 	return cfg, nil
 }
 
-var errNoRepo = errors.New("set repo in " + filepath.Join(configDir(), "config.toml") + ", or run `kelpie configure --repo <path>`")
+var errNoRepo = errors.New("set repo in " + filepath.Join(configDir(), "config.toml") + ", or run `flatcircle configure --repo <path>`")
 
 func expandHome(p string) string {
 	if rest, ok := strings.CutPrefix(p, "~/"); ok {
@@ -211,7 +239,7 @@ func (c Config) repoFor(b Bead) string {
 	return c.Repo
 }
 
-// allRepos is every repository kelpie follows, for passes that are not about
+// allRepos is every repository flatcircle follows, for passes that are not about
 // one bead (PR listing, worktree sweeps).
 func (c Config) allRepos() []string {
 	repos := []string{filepath.Clean(c.Repo)}

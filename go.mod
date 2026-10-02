@@ -1,4 +1,4 @@
-module github.com/travisjeffery/herdr-kelpie
+module github.com/travisjeffery/herdr-flatcircle
 
 go 1.26.7
 

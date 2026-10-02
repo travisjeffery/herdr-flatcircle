@@ -12,16 +12,19 @@ import (
 )
 
 type Bead struct {
-	ID        string    `json:"id"`
-	Title     string    `json:"title"`
-	Notes     string    `json:"notes"`
-	Status    string    `json:"status"`
-	Priority  int       `json:"priority"`
-	Type      string    `json:"issue_type"`
-	Assignee  string    `json:"assignee"`
-	Labels    []string  `json:"labels"`
-	Parent    string    `json:"parent"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Notes string `json:"notes"`
+	// Description is only in bd show; bd list leaves it out.
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+	Status      string    `json:"status"`
+	Priority    int       `json:"priority"`
+	Type        string    `json:"issue_type"`
+	Assignee    string    `json:"assignee"`
+	Labels      []string  `json:"labels"`
+	Parent      string    `json:"parent"`
+	UpdatedAt   time.Time `json:"updated_at"`
 
 	ClosedAt    time.Time `json:"closed_at"`
 	CloseReason string    `json:"close_reason"`

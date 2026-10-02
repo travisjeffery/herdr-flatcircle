@@ -34,6 +34,20 @@ type Config struct {
 	// Only keys with these team prefixes count as Linear issues; empty accepts
 	// any key outside a small denylist.
 	LinearPrefixes []string `toml:"linear_prefixes"`
+	// VerifyMinutes is how often the ticker re-checks stale beads for work
+	// that is already done; 0 turns it off. Each pass rebuilds only what
+	// changed since the last, and each bead in full once a day.
+	VerifyMinutes int `toml:"verify_minutes"`
+	// StaleDays is how long a bead goes untouched before verify checks it.
+	StaleDays int `toml:"stale_days"`
+	// AutoClose lets verify close a bead on strong evidence; off, it only
+	// flags it to the coordinator.
+	AutoClose bool `toml:"auto_close"`
+	// VerifyMax caps the GitHub calls a verify pass makes beyond its probes.
+	VerifyMax int `toml:"verify_max"`
+	// GHMinRemaining skips a verify pass while fewer GitHub GraphQL points
+	// than this are left: the hourly limit is shared with every agent.
+	GHMinRemaining int `toml:"gh_min_remaining"`
 	// HerdrSocket is the herdr server the coordinator runs on. The ticker
 	// always talks to it, whichever server's plugin startup launched it.
 	HerdrSocket string `toml:"herdr_socket"`
@@ -54,6 +68,10 @@ func defaultConfig() Config {
 		GHSeconds:        60,
 		IdleSeconds:      60,
 		Nudge:            true,
+		VerifyMinutes:    60,
+		StaleDays:        3,
+		VerifyMax:        20,
+		GHMinRemaining:   1000,
 	}
 }
 
@@ -220,7 +238,11 @@ func (c Config) tick() time.Duration { return time.Duration(max(c.TickSeconds, 5
 func (c Config) ghEvery() time.Duration {
 	return time.Duration(max(c.GHSeconds, 30)) * time.Second
 }
-func (c Config) idle() time.Duration { return time.Duration(c.IdleSeconds) * time.Second }
+func (c Config) verifyEvery() time.Duration {
+	return time.Duration(max(c.VerifyMinutes, 0)) * time.Minute
+}
+func (c Config) staleAge() time.Duration { return time.Duration(max(c.StaleDays, 0)) * 24 * time.Hour }
+func (c Config) idle() time.Duration     { return time.Duration(c.IdleSeconds) * time.Second }
 
 func instructionsPath() string { return filepath.Join(configDir(), "instructions.md") }
 

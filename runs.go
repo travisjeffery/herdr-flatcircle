@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"time"
 )
 
 // Run is a GitHub Actions run a bead's notes point at: the deploy, canary or
@@ -17,9 +18,11 @@ type Run struct {
 	URL        string `json:"url"`
 	Title      string `json:"displayTitle"`
 	Repo       string `json:"repo"`
+	// CreatedAt orders a failed run against a later one of its workflow.
+	CreatedAt time.Time `json:"createdAt"`
 }
 
-const runFields = "databaseId,status,conclusion,workflowName,url,displayTitle"
+const runFields = "databaseId,status,conclusion,workflowName,url,displayTitle,createdAt"
 
 const followedRuns = 3
 

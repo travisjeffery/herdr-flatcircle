@@ -18,16 +18,19 @@ import (
 )
 
 type TickerState struct {
-	Threads      map[string]Snapshot `json:"threads"`
-	LastGH       time.Time           `json:"last_gh"`
-	PRs          map[string]PR       `json:"prs"`  // by bead id, from the last gh pass
-	Runs         map[string][]Run    `json:"runs"` // by bead id, from the last gh pass
-	LastNudge    time.Time           `json:"last_nudge"`
-	Login        string              `json:"login"`
-	CoordReady   time.Time           `json:"coord_ready"`
-	CoordSeq     int64               `json:"coord_seq"`
-	GHFailingFor time.Time           `json:"gh_failing_since"`
-	GHFailingIn  []string            `json:"gh_failing_in"` // repos whose PR listing failed
+	Threads      map[string]Snapshot   `json:"threads"`
+	LastGH       time.Time             `json:"last_gh"`
+	PRs          map[string]PR         `json:"prs"`  // by bead id, from the last gh pass
+	Runs         map[string][]Run      `json:"runs"` // by bead id, from the last gh pass
+	LastNudge    time.Time             `json:"last_nudge"`
+	Login        string                `json:"login"`
+	CoordReady   time.Time             `json:"coord_ready"`
+	CoordSeq     int64                 `json:"coord_seq"`
+	GHFailingFor time.Time             `json:"gh_failing_since"`
+	GHFailingIn  []string              `json:"gh_failing_in"` // repos whose PR listing failed
+	LastVerify   time.Time             `json:"last_verify"`
+	Verified     map[string]VerifyMark `json:"verified"`     // by bead id, from verify passes
+	VerifyRepos  map[string]VerifyRepo `json:"verify_repos"` // by repo path
 }
 
 func statePath() string { return filepath.Join(stateDir(), "state.json") }
@@ -307,6 +310,9 @@ func (t Ticker) once(st *TickerState) error {
 		if err := t.herdr.ReportState(coord.PaneID, tokens, ttl); err != nil {
 			t.log.Printf("sidebar %s: %v", t.cfg.CoordinatorName, err)
 		}
+	}
+	if verifyDue(t.cfg, *st, now) {
+		t.verify(st, now)
 	}
 	t.nudgeCoordinator(st, agents, now)
 	return nil

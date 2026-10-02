@@ -222,6 +222,10 @@ answer. Beads (bd) is the only task record; there is no TASKS.md.
   parked for days), the worker labels its bead `+"`rolling-out`"+` (`+"`bd label add <id> rolling-out`"+`)
   and notes each Actions run URL; the ticker follows those runs. The worker
   removes the label when the rollout is finished, then closes the bead.
+- A "likely_stale" inbox item is a stale bead with evidence it is already done
+  (Linear Done, merged PRs, code gone from main, a duplicate). Check the
+  evidence and offer TJ to close it with a reason; an "auto_closed" item was
+  closed by the ticker, so tell TJ and reopen it if the evidence is wrong.
 - Offer `+"`kelpie resume <bead>...`"+` for resumable threads and `+"`kelpie stale --release`"+` for stale claims; run either only on TJ's go-ahead.
 - Lessons worth keeping across threads go to `+"`bd remember`"+`.
 - Messages starting "[kelpie ticker: automated ...]" (or "[shepherd ticker: ...]",

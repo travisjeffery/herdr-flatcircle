@@ -208,6 +208,37 @@ once per head commit; otherwise the board shows
   that git reports prunable. `--yes` removes only the ones that are clean,
   fully pushed, have no agent in them and whose bead isn't still active. It
   deletes a local branch only when its PR merged.
+- **Stale beads.** Every `verify_minutes` (hourly) the ticker re-checks open
+  beads that have no agent and haven't been touched for `stale_days` (3),
+  looking for evidence their work is already done:
+  1. the bead's Linear issue is Done or Canceled (through the `linear` CLI,
+     so only with `LINEAR_API_KEY` or `linear auth login` in the ticker's
+     environment);
+  2. every PR its notes link is merged, none open;
+  3. merged PRs since it was opened mention its Linear key or id;
+  4. for a bug, the code it quotes was on the default branch when it was
+     opened and none of it is now (a local `git grep`);
+  5. a closed bead has the same title, or the same Linear key outside its
+     own family.
+
+  Strong evidence closes the bead with a reason citing it, but only with
+  `auto_close = true`: (1); (2) unless the title is rollout-shaped or the notes
+  after the last PR say work remains; and (4) once a run it links has failed
+  and a later run of that workflow passed. A `rolling-out`, `needs_me` or epic
+  bead, or one with open children, is never closed. Everything else becomes a
+  `likely_stale` inbox item for the coordinator; a closed one, `auto_closed`.
+
+  Passes are incremental. Each starts with one Linear query, one GitHub
+  GraphQL query (the linked PRs' state and head, and per repo whose default
+  branch moved, the PRs merged since the last pass, matched against beads
+  locally) and a `git fetch` per repo. A bead is rebuilt only when one of
+  those inputs changed, its bead changed, or its daily full re-check is due
+  (description, per-bead search, failed-run lookup). Only those extra GitHub
+  calls count against `verify_max`; beads over it wait for the next pass. A
+  pass is skipped while fewer than `gh_min_remaining` GraphQL points are left
+  this hour, since the limit is shared with every agent. A verdict is written
+  to the inbox once and again only when it changes. `kelpie verify` shows what
+  a pass would do; `kelpie verify <bead>` checks one bead in full.
 - **Reporting.** `kelpie report` prints beads closed in the window with
   their close reasons and PRs, your PRs merged without a bead, open PRs in
   flight, and `needs_me` beads with their latest note.
@@ -427,6 +458,11 @@ auto_resolve = false      # remove a merged, closed bead's worktree automaticall
 repos = { infra = "~/src/infra", model = "~/src/model" }
 linear_prefixes = ["ENG"] # Linear team keys to recognise; empty accepts any KEY-123
 herdr_socket = "~/.config/herdr/herdr.sock"  # the herdr server the coordinator runs on
+verify_minutes = 60       # how often to re-check stale beads; 0 turns it off
+stale_days = 3            # a bead untouched this long is checked
+auto_close = false        # close beads on strong evidence; off, they are only flagged
+verify_max = 20           # GitHub calls a pass may make beyond its probes
+gh_min_remaining = 1000   # skip a pass below this many GraphQL points left
 ```
 
 The ticker always follows `herdr_socket` (herdr's default server unless set),
@@ -458,6 +494,7 @@ configured repository falls back to `repo` and shows as a warning in
 | `kelpie inbox done [<bead>...]` | Mark inbox items handled (all of them if no bead is given). |
 | `kelpie resume [<bead>...] [--agent K]` | Restart exited workers in their worktrees, continuing their last conversation. |
 | `kelpie stale [--days N] [--release]` | List claims with no agent, worktree or PR untouched N days (7); `--release` reopens them. |
+| `kelpie verify [<bead>...] [--yes]` | Stale beads with evidence their work is done. Lists what a pass would do; `--yes` acts like the ticker (closes only with `auto_close`). |
 | `kelpie resolve <bead> [--force]` | Remove a finished bead's worktree, and its branch if the PR merged. |
 | `kelpie sweep [--yes]` | List finished worktrees across every repo; `--yes` removes only the safe ones. |
 | `kelpie report [--since 24h\|7d\|DATE]` | Markdown summary of what shipped, what's in flight and what needs you. |

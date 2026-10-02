@@ -193,6 +193,8 @@ const (
 	EventResumed      EventKind = "resumed"
 	EventRunSucceeded EventKind = "run_succeeded"
 	EventRunFailed    EventKind = "run_failed"
+	EventLikelyStale  EventKind = "likely_stale"
+	EventAutoClosed   EventKind = "auto_closed"
 )
 
 type Event struct {

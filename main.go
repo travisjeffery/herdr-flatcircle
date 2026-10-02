@@ -31,6 +31,8 @@ Usage:
                                                 their last conversation (all resumable if none given)
   kelpie stale [--days N] [--release]         claims with no agent or worktree untouched N days
                                             (default 7); --release reopens them
+  kelpie verify [<bead>...] [--yes]           stale beads with evidence they are already done; --yes
+                                            closes (with auto_close) or flags them like the ticker
   kelpie board                                the board (runs as the plugin popup)
   kelpie ticker run|start|stop|status         the background loop: sidebar, PR follow-up, nudges
   kelpie tick                                 one ticker pass in the foreground
@@ -89,7 +91,7 @@ func run(args []string) error {
 	repoFlag := fs.String("repo", "", "configure: the repository kelpie works in, written to config.toml if it has none")
 	force := fs.Bool("force", false, "resolve even if the bead is open or its agent is working")
 	sinceFlag := fs.String("since", "24h", "report window: Nh, Nd or YYYY-MM-DD")
-	yes := fs.Bool("yes", false, "sweep: remove the clean candidates instead of listing them")
+	yes := fs.Bool("yes", false, "sweep: remove the clean candidates; verify: act on the verdicts")
 	days := fs.Int("days", 7, "stale: untouched for at least this many days")
 	release := fs.Bool("release", false, "stale: set each stale claim back to open")
 	pos, err := interspersed(fs, rest)
@@ -185,6 +187,16 @@ func run(args []string) error {
 	case "stale":
 		lines, err := stale(cfg, h, *days, *release)
 		fmt.Print(strings.Join(append(lines, ""), "\n"))
+		return err
+	case "verify":
+		st := loadState()
+		lines, err := verifyPass(cfg, liveVerifyEnv(cfg, h), &st, pos, *yes, time.Now())
+		fmt.Print(strings.Join(append(lines, ""), "\n"))
+		if *yes && !errors.Is(err, errBudget) {
+			if serr := saveState(st); serr != nil {
+				return serr
+			}
+		}
 		return err
 	case "board":
 		return runBoard(cfg)

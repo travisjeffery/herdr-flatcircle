@@ -210,3 +210,13 @@ func TestSweepKeepsActiveBeadsWorktrees(t *testing.T) {
 		}
 	}
 }
+
+func TestBeadForBranchExactParentBeatsChild(t *testing.T) {
+	beads := []Bead{{ID: "backend-qkvu", Title: "2 things"}, {ID: "backend-qkvu.2", Title: "radar"}}
+	if b, ok := beadForBranch("tj/", "tj/backend-qkvu-2-things", beads); !ok || b.ID != "backend-qkvu" {
+		t.Errorf("got %s (%v), want the parent whose exact branch it is", b.ID, ok)
+	}
+	if b, ok := beadForBranch("tj/", "tj/backend-qkvu-2-radar", beads); !ok || b.ID != "backend-qkvu.2" {
+		t.Errorf("got %s (%v), want the child", b.ID, ok)
+	}
+}

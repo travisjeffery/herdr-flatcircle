@@ -59,11 +59,25 @@ func TestRepoPRsMatchesOnlyTheBeadsRepo(t *testing.T) {
 	if !listed {
 		t.Fatal("infra was listed but repoPRs reports it failed")
 	}
-	if pr, ok := prForBead(b, multi.BranchPrefix, own, nil, nil); ok {
+	if pr, _, ok := prForBead(b, multi.BranchPrefix, own, nil, nil); ok {
 		t.Errorf("matched %s from another repo's listing", pr.URL)
 	}
 	if _, listed := repoPRs(multi, b, map[string][]PR{"/src/app": {onBranch}}); listed {
 		t.Error("infra's listing failed but repoPRs reports it listed")
+	}
+}
+
+func TestPROwnerIsScopedToTheBeadsRepo(t *testing.T) {
+	b := labelled("b-1", "repo:infra")
+	pr := PR{Number: 3, URL: "https://github.com/o/app/pull/3", Head: "tj/b-1-fix"}
+	owner := prOwner(multi, []Bead{b}, map[string][]PR{"/src/app": {pr}, "/src/infra": nil})
+	if id := owner(pr); id != "" {
+		t.Errorf("an app PR on infra bead b-1's branch name went to %s", id)
+	}
+	pr.URL = "https://github.com/o/infra/pull/3"
+	owner = prOwner(multi, []Bead{b}, map[string][]PR{"/src/infra": {pr}})
+	if id := owner(pr); id != "b-1" {
+		t.Errorf("owner = %q, want b-1", id)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,8 +22,9 @@ import (
 type TickerState struct {
 	Threads      map[string]Snapshot   `json:"threads"`
 	LastGH       time.Time             `json:"last_gh"`
-	PRs          map[string]PR         `json:"prs"`  // by bead id, from the last gh pass
-	Runs         map[string][]Run      `json:"runs"` // by bead id, from the last gh pass
+	PRs          map[string]PR         `json:"prs"`                  // by bead id, from the last gh pass
+	MergedPRs    map[string][]PR       `json:"merged_prs,omitempty"` // each bead's merged PRs, from the last gh pass
+	Runs         map[string][]Run      `json:"runs"`                 // by bead id, from the last gh pass
 	LastNudge    time.Time             `json:"last_nudge"`
 	Login        string                `json:"login"`
 	CoordReady   time.Time             `json:"coord_ready"`
@@ -118,6 +120,7 @@ func (t Ticker) gather(st *TickerState, now time.Time) ([]Thread, map[string]Age
 			th.Reviews = reviewsNotBy(pr.Reviews, st.Login)
 			th.BotReviews = botReviews(pr.Reviews)
 		}
+		th.Merged = st.MergedPRs[b.ID]
 		th.Runs = st.Runs[b.ID]
 		threads = append(threads, th)
 	}
@@ -150,31 +153,40 @@ func (t Ticker) refreshPRs(st *TickerState, active []Bead) {
 			inList[pr.URL] = pr
 		}
 	}
+	owner := prOwner(t.cfg, active, mine)
 	// Each bead costs a gh pr view or two; run them a few at a time so a pass
 	// over dozens of beads doesn't take a minute.
 	found := make([]*PR, len(active))
+	merged := make([][]PR, len(active))
 	eachLimit(len(active), ghParallel, func(i int) {
-		if pr, ok := t.beadPR(st, active[i], mine, inList, active); ok {
+		pr, m, ok := t.beadPR(st, active[i], mine, inList, owner)
+		if ok {
 			found[i] = &pr
 		}
+		merged[i] = m
 	})
 	prs := map[string]PR{}
+	st.MergedPRs = map[string][]PR{}
 	for i, b := range active {
 		if found[i] != nil {
 			prs[b.ID] = *found[i]
+		}
+		if len(merged[i]) > 0 {
+			st.MergedPRs[b.ID] = merged[i]
 		}
 	}
 	t.gatePRs(st.PRs, prs)
 	st.PRs = prs
 }
 
-// beadPR is the PR b is delivered through, in full detail when open; false
-// when it has none or its detail can't be fetched and nothing older stands in.
-func (t Ticker) beadPR(st *TickerState, b Bead, mine map[string][]PR, inList map[string]PR, active []Bead) (PR, bool) {
+// beadPR is the PR b is delivered through, in full detail when open, and b's
+// merged PRs; false when it has none or its detail can't be fetched and
+// nothing older stands in.
+func (t Ticker) beadPR(st *TickerState, b Bead, mine map[string][]PR, inList map[string]PR, owner func(PR) string) (PR, []PR, bool) {
 	own, listed := repoPRs(t.cfg, b, mine)
 	if !listed {
 		old, ok := st.PRs[b.ID]
-		return old, ok
+		return old, st.MergedPRs[b.ID], ok
 	}
 	byURL := map[string]PR{}
 	for _, u := range NotedPRs(b.Notes) {
@@ -184,25 +196,25 @@ func (t Ticker) beadPR(st *TickerState, b Bead, mine map[string][]PR, inList map
 			byURL[u] = pr
 		}
 	}
-	pr, ok := prForBead(b, t.cfg.BranchPrefix, own, byURL, active)
+	pr, merged, ok := prForBead(b, t.cfg.BranchPrefix, own, byURL, owner)
 	if !ok || pr.State != "OPEN" {
-		return pr, ok
+		return pr, merged, ok
 	}
 	full, err := t.gh.View(pr.URL, true)
 	if err == nil {
 		err = t.gh.MarkBotReviews(&full)
 	}
 	if err == nil {
-		return full, true
+		return full, merged, true
 	}
 	t.log.Printf("gh pr view %d: %v", pr.Number, err)
 	old, ok := st.PRs[b.ID]
 	if !ok || old.Number != pr.Number {
 		// The list entry has no reviews or checks; recording it would make
 		// the next good pass see every existing review as new.
-		return PR{}, false
+		return PR{}, merged, false
 	}
-	return old, true
+	return old, merged, true
 }
 
 // ghParallel bounds the gh calls a pass makes at once.
@@ -266,6 +278,23 @@ func applyGates(old, prs map[string]PR, gates map[string]MergeGate, failed bool,
 func repoPRs(cfg Config, b Bead, mine map[string][]PR) ([]PR, bool) {
 	prs, ok := mine[filepath.Clean(cfg.repoFor(b))]
 	return prs, ok
+}
+
+// prOwner names the active bead whose branch a PR is on, or "". Branch names
+// are per repository, so the PR must also be listed in that bead's own
+// repository, where the bead itself finds it.
+func prOwner(cfg Config, active []Bead, mine map[string][]PR) func(PR) string {
+	return func(pr PR) string {
+		b, ok := beadForBranch(cfg.BranchPrefix, pr.Head, active)
+		if !ok {
+			return ""
+		}
+		own, _ := repoPRs(cfg, b, mine)
+		if slices.ContainsFunc(own, func(p PR) bool { return p.URL == pr.URL }) {
+			return b.ID
+		}
+		return ""
+	}
 }
 
 func rank(g Group, id string) string { return fmt.Sprintf("%d-%s", int(g), id) }

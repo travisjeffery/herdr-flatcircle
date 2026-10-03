@@ -97,17 +97,26 @@ func gitRun(dir string, args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
-// beadForBranch finds the bead a flatcircle branch was cut for, the most
-// specific when several match.
+// beadForBranch finds the bead a flatcircle branch was cut for: one whose own
+// name the branch is before one it merely starts with, then the most specific.
+// A parent titled "2 things" owns tj/backend-x-2-things although its child
+// backend-x.2 would also match it.
 func beadForBranch(prefix, branch string, beads []Bead) (Bead, bool) {
 	var best Bead
-	found := false
+	bestScore := 0
 	for _, b := range beads {
-		if onBeadBranch(prefix, branch, b) && (!found || len(b.ID) > len(best.ID)) {
-			best, found = b, true
+		if !onBeadBranch(prefix, branch, b) {
+			continue
+		}
+		score := 1
+		if branch == prefix+agentName(b.ID) || branch == branchFor(prefix, b) {
+			score = 2
+		}
+		if score > bestScore || score == bestScore && len(b.ID) > len(best.ID) {
+			best, bestScore = b, score
 		}
 	}
-	return best, found
+	return best, bestScore > 0
 }
 
 // classifySweep picks the linked worktrees that are finished with: merged PR,

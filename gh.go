@@ -332,17 +332,25 @@ func parseGates(out []byte, alias map[string]string, now time.Time) (map[string]
 }
 
 // prForBead picks the PR a bead is being delivered through, from the PRs on its
-// own branch and the PRs its notes link to. A bead worked on a branch named for
-// its Linear key (tj/eng-1102-…) is found through its notes, but a noted PR on
-// another active bead's branch is that bead's. An open PR wins, own branch
-// first, then the latest noted; with none open, the last to merge, so a bead
-// with several PRs settles on one pick instead of flipping between them and
-// is only told to close once none is open.
-func prForBead(b Bead, branchPrefix string, mine []PR, byURL map[string]PR, active []Bead) (PR, bool) {
+// own branch and the PRs its notes link to, and returns the merged ones among
+// them. A bead worked on a branch named for its Linear key (tj/eng-1102-…) is
+// found through its notes, but a noted PR that owner gives to another bead is
+// that bead's. An open PR wins, own branch first, then the latest noted; with
+// none open, the last to merge, so a bead with several PRs settles on one pick
+// instead of flipping between them and is only told to close once none is
+// open.
+func prForBead(b Bead, branchPrefix string, mine []PR, byURL map[string]PR, owner func(PR) string) (PR, []PR, bool) {
 	var cands []PR
+	seen := map[string]bool{}
+	add := func(pr PR) {
+		if pr.URL == "" || !seen[pr.URL] {
+			seen[pr.URL] = true
+			cands = append(cands, pr)
+		}
+	}
 	for _, pr := range mine {
 		if onBeadBranch(branchPrefix, pr.Head, b) {
-			cands = append(cands, pr)
+			add(pr)
 		}
 	}
 	urls := NotedPRs(b.Notes)
@@ -351,18 +359,24 @@ func prForBead(b Bead, branchPrefix string, mine []PR, byURL map[string]PR, acti
 		if !ok {
 			continue
 		}
-		if owner, ok := beadForBranch(branchPrefix, pr.Head, active); ok && owner.ID != b.ID {
-			continue
+		if owner != nil {
+			if id := owner(pr); id != "" && id != b.ID {
+				continue
+			}
 		}
-		cands = append(cands, pr)
+		add(pr)
 	}
-	best, found := PR{}, false
-	for _, pr := range cands {
-		if !found || prRank(pr, best) {
-			best, found = pr, true
+	var best PR
+	var merged []PR
+	for i, pr := range cands {
+		if i == 0 || prRank(pr, best) {
+			best = pr
+		}
+		if pr.State == "MERGED" {
+			merged = append(merged, pr)
 		}
 	}
-	return best, found
+	return best, merged, len(cands) > 0
 }
 
 // prRank reports whether a outranks b as a bead's PR: open beats merged beats

@@ -49,6 +49,9 @@ type Thread struct {
 	BotReviews []string
 	Runs       []Run
 	Linear     string
+	// Merged is every merged PR of the bead's, the pick or not, so a merge
+	// behind another open PR is still announced.
+	Merged []PR
 }
 
 func agentReady(a *Agent) bool {
@@ -178,6 +181,12 @@ type Snapshot struct {
 	// ReadyKey is the PR and head commit last seen ready to merge (readyKey),
 	// so ready_to_merge fires once per push and again for a replacement PR.
 	ReadyKey string `json:"ready_key,omitempty"`
+	// Merged holds the URL of every PR of the bead's already announced as
+	// merged, so a bead with several PRs hears of each merge once.
+	// MergedTracked marks a snapshot that kept it; older ones knew only their
+	// own PR's state.
+	Merged        []string `json:"merged,omitempty"`
+	MergedTracked bool     `json:"merged_tracked,omitempty"`
 }
 
 type EventKind string
@@ -229,6 +238,12 @@ func snapshot(t Thread, prev Snapshot, now time.Time) Snapshot {
 			s.ReadySince = prev.ReadySince
 		default:
 			s.ReadySince = now
+		}
+	}
+	s.Merged, s.MergedTracked = slices.Clone(prev.Merged), true
+	for _, pr := range mergedPRs(t) {
+		if !slices.Contains(s.Merged, pr.URL) {
+			s.Merged = append(s.Merged, pr.URL)
 		}
 	}
 	if t.PR != nil {
@@ -297,17 +312,25 @@ func transition(t Thread, prev Snapshot, first bool, now time.Time) Outcome {
 				t.PR.Number, t.PR.HeadSHA, approval(t.PR), t.PR.Number, t.PR.HeadSHA))
 		}
 	}
-	if t.PR != nil && t.PR.State == "MERGED" && prev.PRState != "MERGED" {
+	if news := newlyMerged(t, prev); len(news) > 0 {
 		o.Notify = true
-		ev(EventMerged, "PR #%d merged", t.PR.Number)
-		if t.Bead.HasLabel(LabelRollingOut) {
+		var nums []string
+		for _, pr := range news {
+			ev(EventMerged, "PR #%d merged", pr.Number)
+			nums = append(nums, fmt.Sprintf("#%d", pr.Number))
+		}
+		what := "PR " + strings.Join(nums, ", ")
+		switch {
+		case t.Bead.HasLabel(LabelRollingOut):
 			o.Prompts = append(o.Prompts, fmt.Sprintf(
-				"[flatcircle: automated, not the user] PR #%d merged. Continue the rollout with its next step. When the rollout is finished and verified, remove the label with `bd label remove %s %s`, then close the bead with `bd close %s --reason \"<what shipped and how it was verified>\"`.",
-				t.PR.Number, id, LabelRollingOut, id))
-		} else if t.Bead.Status != StatusClosed {
+				"[flatcircle: automated, not the user] %s merged. Continue the rollout with its next step. When the rollout is finished and verified, remove the label with `bd label remove %s %s`, then close the bead with `bd close %s --reason \"<what shipped and how it was verified>\"`.",
+				what, id, LabelRollingOut, id))
+		case t.PR != nil && t.PR.State == "OPEN":
+			// Another of the bead's PRs is still open; closing waits for it.
+		case t.Bead.Status != StatusClosed:
 			o.Prompts = append(o.Prompts, fmt.Sprintf(
-				"[flatcircle: automated, not the user] PR #%d merged. Verify what needs verifying after merge, then close the bead with `bd close %s --reason \"<what shipped and how it was verified>\"` and stop.",
-				t.PR.Number, id))
+				"[flatcircle: automated, not the user] %s merged. Verify what needs verifying after merge, then close the bead with `bd close %s --reason \"<what shipped and how it was verified>\"` and stop.",
+				what, id))
 		}
 	}
 	for _, r := range finishedRuns(t.Runs, prev.Runs) {
@@ -334,6 +357,34 @@ func transition(t Thread, prev Snapshot, first bool, now time.Time) Outcome {
 		ev(EventAgentGone, "%s's agent exited while the bead is still %s", id, t.Bead.Status)
 	}
 	return o
+}
+
+// mergedPRs is every merged PR of t's: its merged list and its pick.
+func mergedPRs(t Thread) []PR {
+	prs := slices.Clone(t.Merged)
+	if t.PR != nil && t.PR.State == "MERGED" && !slices.ContainsFunc(prs, func(p PR) bool { return p.URL == t.PR.URL }) {
+		prs = append(prs, *t.PR)
+	}
+	return prs
+}
+
+// newlyMerged is t's merged PRs that prev has not announced. A snapshot from
+// before Merged was kept knew only its own PR, so the first pass after
+// upgrading announces only the pick, as before.
+func newlyMerged(t Thread, prev Snapshot) []PR {
+	if !prev.MergedTracked {
+		if t.PR != nil && t.PR.State == "MERGED" && !(prev.PRNumber == t.PR.Number && prev.PRState == "MERGED") {
+			return []PR{*t.PR}
+		}
+		return nil
+	}
+	var news []PR
+	for _, pr := range mergedPRs(t) {
+		if !slices.Contains(prev.Merged, pr.URL) {
+			news = append(news, pr)
+		}
+	}
+	return news
 }
 
 const readyPrompt = "[" + toolName + ": automated, not the user] PR #"

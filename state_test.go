@@ -174,15 +174,142 @@ func TestBranchFor(t *testing.T) {
 func TestPRForBead(t *testing.T) {
 	b := Bead{ID: "backend-ab12", Notes: "PR: https://github.com/acme/app/pull/1\nlater PR https://github.com/acme/infra/pull/2"}
 	mine := []PR{{Number: 9, Head: "tj/backend-ab12x-other"}, {Number: 3, Head: "tj/backend-ab12-fix"}}
-	if pr, ok := prForBead(b, "tj/", mine, nil); !ok || pr.Number != 3 {
+	if pr, _, ok := prForBead(b, "tj/", mine, nil, nil); !ok || pr.Number != 3 {
 		t.Fatalf("own branch should win and not match a longer id: %+v", pr)
 	}
 	byURL := map[string]PR{
 		"https://github.com/acme/app/pull/1":   {Number: 1},
 		"https://github.com/acme/infra/pull/2": {Number: 2},
 	}
-	if pr, ok := prForBead(b, "tj/", nil, byURL); !ok || pr.Number != 2 {
+	if pr, _, ok := prForBead(b, "tj/", nil, byURL, nil); !ok || pr.Number != 2 {
 		t.Fatalf("latest noted PR should win: %+v", pr)
+	}
+}
+
+func TestPRForBeadSkipsChildBranches(t *testing.T) {
+	mine := []PR{
+		{Number: 2, Head: "tj/backend-qkvu-2-inf-1247-radar-rules"},
+		{Number: 10, Head: "tj/backend-qkvu-10-follow-up"},
+		{Number: 1, Head: "tj/backend-qkvu-flatcircle-thing"},
+		{Number: 71, Head: "tj/backend-cw9f-7-1-nested"},
+		{Number: 7, Head: "tj/backend-cw9f-7-sweep"},
+	}
+	cases := []struct {
+		id    string
+		title string
+		want  int
+	}{
+		{"backend-qkvu", "flatcircle thing", 1},
+		{"backend-qkvu.2", "inf-1247 radar rules", 2},
+		{"backend-qkvu.10", "follow up", 10},
+		{"backend-cw9f.7", "sweep", 7},
+		{"backend-cw9f.7.1", "nested", 71},
+	}
+	for _, c := range cases {
+		pr, _, ok := prForBead(Bead{ID: c.id, Title: c.title}, "tj/", mine, nil, nil)
+		if !ok || pr.Number != c.want {
+			t.Errorf("%s: got #%d (%v), want #%d", c.id, pr.Number, ok, c.want)
+		}
+	}
+	// A parent with no PR of its own matches none of its children's.
+	if pr, _, ok := prForBead(Bead{ID: "backend-qkvu"}, "tj/", mine[:2], nil, nil); ok {
+		t.Errorf("parent matched child PR #%d", pr.Number)
+	}
+	// The exact branch flatcircle names for a bead counts even when its slug
+	// starts with digits.
+	b := Bead{ID: "backend-qkvu", Title: "2 things"}
+	if pr, _, ok := prForBead(b, "tj/", []PR{{Number: 5, Head: "tj/backend-qkvu-2-things"}}, nil, nil); !ok || pr.Number != 5 {
+		t.Errorf("exact branch: got #%d (%v)", pr.Number, ok)
+	}
+}
+
+func TestPRForBeadLeavesAnotherBeadsBranch(t *testing.T) {
+	owner := Bead{ID: "backend-qkvu"}
+	linker := Bead{ID: "backend-72s4", Notes: "see https://github.com/o/backend/pull/14776"}
+	byURL := map[string]PR{"https://github.com/o/backend/pull/14776": {Number: 14776, State: "OPEN", Head: "tj/backend-qkvu-radar"}}
+	ownedBy := func(id string) func(PR) string { return func(PR) string { return id } }
+	if pr, _, ok := prForBead(linker, "tj/", nil, byURL, ownedBy(owner.ID)); ok {
+		t.Errorf("72s4 took #%d from the bead whose branch it is on", pr.Number)
+	}
+	// With no other owner (inactive, or the PR is in another repo), the link stands.
+	if _, _, ok := prForBead(linker, "tj/", nil, byURL, ownedBy("")); !ok {
+		t.Error("noted PR nobody else owns should still count")
+	}
+}
+
+func TestPRForBeadPrefersOpenThenLatestMerge(t *testing.T) {
+	b := Bead{ID: "backend-wlri", Notes: "PR: https://github.com/o/a/pull/273\nPR: https://github.com/o/b/pull/151"}
+	at := func(h int) time.Time { return t0.Add(time.Duration(h) * time.Hour) }
+	byURL := map[string]PR{
+		"https://github.com/o/a/pull/273": {Number: 273, URL: "https://github.com/o/a/pull/273", State: "OPEN"},
+		"https://github.com/o/b/pull/151": {Number: 151, URL: "https://github.com/o/b/pull/151", State: "MERGED", MergedAt: at(1)},
+	}
+	pr, merged, _ := prForBead(b, "tj/", nil, byURL, nil)
+	if pr.Number != 273 {
+		t.Fatalf("open PR should win over the later-noted merged one, got #%d", pr.Number)
+	}
+	if len(merged) != 1 || merged[0].Number != 151 {
+		t.Fatalf("merged = %+v, want #151", merged)
+	}
+	byURL["https://github.com/o/a/pull/273"] = PR{Number: 273, State: "MERGED", MergedAt: at(2)}
+	if pr, _, _ := prForBead(b, "tj/", nil, byURL, nil); pr.Number != 273 {
+		t.Fatalf("last merge should win, got #%d", pr.Number)
+	}
+	byURL["https://github.com/o/b/pull/151"] = PR{Number: 151, State: "CLOSED"}
+	if pr, _, _ := prForBead(b, "tj/", nil, byURL, nil); pr.Number != 273 {
+		t.Fatalf("merged should win over closed, got #%d", pr.Number)
+	}
+}
+
+func TestMergedOncePerPR(t *testing.T) {
+	a := &PR{Number: 151, URL: "https://github.com/o/b/pull/151", State: "MERGED"}
+	b := &PR{Number: 273, URL: "https://github.com/o/a/pull/273", State: "OPEN"}
+	prev := snapshot(thread(bead(StatusInProgress), agent("idle", 1), a), Snapshot{PRNumber: 151, PRState: "OPEN"}, t0)
+	// The pick moves to the open PR and back: the first merge is not news.
+	prev = snapshot(thread(bead(StatusInProgress), agent("idle", 1), b), prev, t0)
+	th := thread(bead(StatusInProgress), agent("idle", 1), a)
+	if o := transition(th, prev, false, t0); len(o.Events) != 0 || len(o.Prompts) != 0 {
+		t.Fatalf("#151 merge re-announced: %+v", o)
+	}
+	b.State = "MERGED"
+	th = thread(bead(StatusInProgress), agent("idle", 1), b)
+	if o := transition(th, prev, false, t0); len(o.Prompts) != 1 || !strings.Contains(o.Prompts[0], "PR #273 merged") {
+		t.Fatalf("#273 merge not announced: %+v", o)
+	}
+}
+
+func TestMergedBehindAnotherOpenPR(t *testing.T) {
+	a := PR{Number: 1, URL: "https://github.com/o/a/pull/1", State: "OPEN"}
+	b := PR{Number: 2, URL: "https://github.com/o/a/pull/2", State: "OPEN"}
+	prev := snapshot(thread(bead(StatusInProgress), agent("idle", 1), &a), Snapshot{}, t0)
+	// #1 merges, but #2 is still open and becomes the pick.
+	a.State = "MERGED"
+	th := thread(bead(StatusInProgress), agent("idle", 1), &b)
+	th.Merged = []PR{a}
+	o := transition(th, prev, false, t0)
+	if len(o.Events) != 1 || o.Events[0].Summary != "PR #1 merged" {
+		t.Fatalf("merge behind an open PR not announced: %+v", o.Events)
+	}
+	if len(o.Prompts) != 0 {
+		t.Fatalf("asked to close with #2 still open: %+v", o.Prompts)
+	}
+	prev = snapshot(th, prev, t0)
+	// #2 merges later and wins the pick; #1 is not announced again.
+	b.State = "MERGED"
+	th = thread(bead(StatusInProgress), agent("idle", 1), &b)
+	th.Merged = []PR{a, b}
+	o = transition(th, prev, false, t0)
+	if len(o.Events) != 1 || o.Events[0].Summary != "PR #2 merged" || len(o.Prompts) != 1 || !strings.Contains(o.Prompts[0], "bd close") {
+		t.Fatalf("got %+v", o)
+	}
+}
+
+func TestMergedLegacySnapshotByNumberOnlyOnce(t *testing.T) {
+	// After the upgrade pass, a same-numbered PR from another repo is news.
+	prev := snapshot(thread(bead(StatusInProgress), agent("idle", 1), &PR{Number: 42, URL: "https://github.com/o/a/pull/42", State: "MERGED"}), Snapshot{PRNumber: 42, PRState: "MERGED"}, t0)
+	th := thread(bead(StatusInProgress), agent("idle", 1), &PR{Number: 42, URL: "https://github.com/o/b/pull/42", State: "MERGED"})
+	if o := transition(th, prev, false, t0); len(o.Events) != 1 {
+		t.Fatalf("o/b#42 merge suppressed by o/a#42: %+v", o)
 	}
 }
 

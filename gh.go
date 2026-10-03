@@ -331,21 +331,69 @@ func parseGates(out []byte, alias map[string]string, now time.Time) (map[string]
 	return gates, nil
 }
 
-// prForBead picks the PR a bead is being delivered through: one on the bead's
-// own branch first, else the last PR its notes link to. A bead worked on a
-// branch named for its Linear key (tj/eng-1102-…) is found through its notes.
-func prForBead(b Bead, branchPrefix string, mine []PR, byURL map[string]PR) (PR, bool) {
-	want := branchPrefix + agentName(b.ID)
+// prForBead picks the PR a bead is being delivered through, from the PRs on its
+// own branch and the PRs its notes link to, and returns the merged ones among
+// them. A bead worked on a branch named for its Linear key (tj/eng-1102-…) is
+// found through its notes, but a noted PR that owner gives to another bead is
+// that bead's. An open PR wins, own branch first, then the latest noted; with
+// none open, the last to merge, so a bead with several PRs settles on one pick
+// instead of flipping between them and is only told to close once none is
+// open.
+func prForBead(b Bead, branchPrefix string, mine []PR, byURL map[string]PR, owner func(PR) string) (PR, []PR, bool) {
+	var cands []PR
+	seen := map[string]bool{}
+	add := func(pr PR) {
+		if pr.URL == "" || !seen[pr.URL] {
+			seen[pr.URL] = true
+			cands = append(cands, pr)
+		}
+	}
 	for _, pr := range mine {
-		if pr.Head == want || strings.HasPrefix(pr.Head, want+"-") {
-			return pr, true
+		if onBeadBranch(branchPrefix, pr.Head, b) {
+			add(pr)
 		}
 	}
 	urls := NotedPRs(b.Notes)
 	for i := len(urls) - 1; i >= 0; i-- {
-		if pr, ok := byURL[urls[i]]; ok {
-			return pr, true
+		pr, ok := byURL[urls[i]]
+		if !ok {
+			continue
+		}
+		if owner != nil {
+			if id := owner(pr); id != "" && id != b.ID {
+				continue
+			}
+		}
+		add(pr)
+	}
+	var best PR
+	var merged []PR
+	for i, pr := range cands {
+		if i == 0 || prRank(pr, best) {
+			best = pr
+		}
+		if pr.State == "MERGED" {
+			merged = append(merged, pr)
 		}
 	}
-	return PR{}, false
+	return best, merged, len(cands) > 0
+}
+
+// prRank reports whether a outranks b as a bead's PR: open beats merged beats
+// closed, and between merged PRs the later merge wins. Ties keep b, the
+// earlier candidate.
+func prRank(a, b PR) bool {
+	rank := func(pr PR) int {
+		switch pr.State {
+		case "OPEN":
+			return 2
+		case "MERGED":
+			return 1
+		}
+		return 0
+	}
+	if rank(a) != rank(b) {
+		return rank(a) > rank(b)
+	}
+	return a.State == "MERGED" && a.MergedAt.After(b.MergedAt)
 }

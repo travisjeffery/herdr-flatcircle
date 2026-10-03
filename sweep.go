@@ -97,25 +97,26 @@ func gitRun(dir string, args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
-// beadForBranch finds the closed bead a flatcircle branch was cut for. A segment
-// of digits right after the id belongs to a sub-bead (backend-x.7 is
-// tj/backend-x-7-…), so it only counts when the branch is exactly the bead's.
-func beadForBranch(prefix, branch string, closed []Bead) (Bead, bool) {
+// beadForBranch finds the bead a flatcircle branch was cut for: one whose own
+// name the branch is before one it merely starts with, then the most specific.
+// A parent titled "2 things" owns tj/backend-x-2-things although its child
+// backend-x.2 would also match it.
+func beadForBranch(prefix, branch string, beads []Bead) (Bead, bool) {
 	var best Bead
-	found := false
-	for _, b := range closed {
-		want := prefix + agentName(b.ID)
-		ok := branch == want || branch == branchFor(prefix, b)
-		if rest, cut := strings.CutPrefix(branch, want+"-"); cut && !ok {
-			seg, _, _ := strings.Cut(rest, "-")
-			_, numErr := strconv.Atoi(seg)
-			ok = numErr != nil
+	bestScore := 0
+	for _, b := range beads {
+		if !onBeadBranch(prefix, branch, b) {
+			continue
 		}
-		if ok && (!found || len(b.ID) > len(best.ID)) {
-			best, found = b, true
+		score := 1
+		if branch == prefix+agentName(b.ID) || branch == branchFor(prefix, b) {
+			score = 2
+		}
+		if score > bestScore || score == bestScore && len(b.ID) > len(best.ID) {
+			best, bestScore = b, score
 		}
 	}
-	return best, found
+	return best, bestScore > 0
 }
 
 // classifySweep picks the linked worktrees that are finished with: merged PR,

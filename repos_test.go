@@ -59,7 +59,7 @@ func TestRepoPRsMatchesOnlyTheBeadsRepo(t *testing.T) {
 	if !listed {
 		t.Fatal("infra was listed but repoPRs reports it failed")
 	}
-	if pr, ok := prForBead(b, multi.BranchPrefix, own, nil); ok {
+	if pr, ok := prForBead(b, multi.BranchPrefix, own, nil, nil); ok {
 		t.Errorf("matched %s from another repo's listing", pr.URL)
 	}
 	if _, listed := repoPRs(multi, b, map[string][]PR{"/src/app": {onBranch}}); listed {

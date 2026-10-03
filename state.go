@@ -178,6 +178,9 @@ type Snapshot struct {
 	// ReadyKey is the PR and head commit last seen ready to merge (readyKey),
 	// so ready_to_merge fires once per push and again for a replacement PR.
 	ReadyKey string `json:"ready_key,omitempty"`
+	// Merged holds the URL of every PR of the bead's already announced as
+	// merged, so a bead with several PRs hears of each merge once.
+	Merged []string `json:"merged,omitempty"`
 }
 
 type EventKind string
@@ -231,8 +234,12 @@ func snapshot(t Thread, prev Snapshot, now time.Time) Snapshot {
 			s.ReadySince = now
 		}
 	}
+	s.Merged = prev.Merged
 	if t.PR != nil {
 		s.PRNumber, s.PRState = t.PR.Number, t.PR.State
+		if t.PR.State == "MERGED" && !slices.Contains(s.Merged, t.PR.URL) {
+			s.Merged = append(slices.Clone(s.Merged), t.PR.URL)
+		}
 		if k := readyKey(t); k != "" {
 			s.ReadyKey = k
 		}
@@ -297,7 +304,7 @@ func transition(t Thread, prev Snapshot, first bool, now time.Time) Outcome {
 				t.PR.Number, t.PR.HeadSHA, approval(t.PR), t.PR.Number, t.PR.HeadSHA))
 		}
 	}
-	if t.PR != nil && t.PR.State == "MERGED" && prev.PRState != "MERGED" {
+	if t.PR != nil && t.PR.State == "MERGED" && !announcedMerge(prev, t.PR) {
 		o.Notify = true
 		ev(EventMerged, "PR #%d merged", t.PR.Number)
 		if t.Bead.HasLabel(LabelRollingOut) {
@@ -334,6 +341,12 @@ func transition(t Thread, prev Snapshot, first bool, now time.Time) Outcome {
 		ev(EventAgentGone, "%s's agent exited while the bead is still %s", id, t.Bead.Status)
 	}
 	return o
+}
+
+// announcedMerge reports whether prev already announced pr's merge. A snapshot
+// from before Merged was kept knows only its own PR.
+func announcedMerge(prev Snapshot, pr *PR) bool {
+	return slices.Contains(prev.Merged, pr.URL) || prev.PRNumber == pr.Number && prev.PRState == "MERGED"
 }
 
 const readyPrompt = "[" + toolName + ": automated, not the user] PR #"

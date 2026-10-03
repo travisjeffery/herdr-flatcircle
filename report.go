@@ -99,11 +99,6 @@ func gatherReport(cfg Config, since time.Time) (Report, error) {
 	return r, nil
 }
 
-func onBeadBranch(head, branchPrefix string, b Bead) bool {
-	want := branchPrefix + agentName(b.ID)
-	return head == want || strings.HasPrefix(head, want+"-")
-}
-
 // buildReport sorts beads and PRs into the report's sections. A merged PR
 // belongs to a bead when the bead's notes link it, the ticker last saw it as
 // the bead's PR, or it is on the bead's branch.
@@ -139,17 +134,10 @@ func buildReport(since time.Time, closed, active []Bead, merged []MergedPR, st T
 			continue
 		}
 		seen[pr.URL] = true
-		owner := ""
-		for _, b := range beads {
-			if onBeadBranch(pr.Head, branchPrefix, b) {
-				owner = b.ID
-				break
-			}
-		}
-		if owner == "" {
-			r.Unbeaded = append(r.Unbeaded, pr)
+		if b, ok := beadForBranch(branchPrefix, pr.Head, beads); ok {
+			onBranch[b.ID] = append(onBranch[b.ID], pr.URL)
 		} else {
-			onBranch[owner] = append(onBranch[owner], pr.URL)
+			r.Unbeaded = append(r.Unbeaded, pr)
 		}
 	}
 	for _, b := range shipped {

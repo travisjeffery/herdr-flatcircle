@@ -97,21 +97,13 @@ func gitRun(dir string, args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
-// beadForBranch finds the closed bead a flatcircle branch was cut for. A segment
-// of digits right after the id belongs to a sub-bead (backend-x.7 is
-// tj/backend-x-7-…), so it only counts when the branch is exactly the bead's.
-func beadForBranch(prefix, branch string, closed []Bead) (Bead, bool) {
+// beadForBranch finds the bead a flatcircle branch was cut for, the most
+// specific when several match.
+func beadForBranch(prefix, branch string, beads []Bead) (Bead, bool) {
 	var best Bead
 	found := false
-	for _, b := range closed {
-		want := prefix + agentName(b.ID)
-		ok := branch == want || branch == branchFor(prefix, b)
-		if rest, cut := strings.CutPrefix(branch, want+"-"); cut && !ok {
-			seg, _, _ := strings.Cut(rest, "-")
-			_, numErr := strconv.Atoi(seg)
-			ok = numErr != nil
-		}
-		if ok && (!found || len(b.ID) > len(best.ID)) {
+	for _, b := range beads {
+		if onBeadBranch(prefix, branch, b) && (!found || len(b.ID) > len(best.ID)) {
 			best, found = b, true
 		}
 	}

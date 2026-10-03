@@ -154,7 +154,7 @@ func (t Ticker) refreshPRs(st *TickerState, active []Bead) {
 	// over dozens of beads doesn't take a minute.
 	found := make([]*PR, len(active))
 	eachLimit(len(active), ghParallel, func(i int) {
-		if pr, ok := t.beadPR(st, active[i], mine, inList); ok {
+		if pr, ok := t.beadPR(st, active[i], mine, inList, active); ok {
 			found[i] = &pr
 		}
 	})
@@ -170,7 +170,7 @@ func (t Ticker) refreshPRs(st *TickerState, active []Bead) {
 
 // beadPR is the PR b is delivered through, in full detail when open; false
 // when it has none or its detail can't be fetched and nothing older stands in.
-func (t Ticker) beadPR(st *TickerState, b Bead, mine map[string][]PR, inList map[string]PR) (PR, bool) {
+func (t Ticker) beadPR(st *TickerState, b Bead, mine map[string][]PR, inList map[string]PR, active []Bead) (PR, bool) {
 	own, listed := repoPRs(t.cfg, b, mine)
 	if !listed {
 		old, ok := st.PRs[b.ID]
@@ -184,7 +184,7 @@ func (t Ticker) beadPR(st *TickerState, b Bead, mine map[string][]PR, inList map
 			byURL[u] = pr
 		}
 	}
-	pr, ok := prForBead(b, t.cfg.BranchPrefix, own, byURL)
+	pr, ok := prForBead(b, t.cfg.BranchPrefix, own, byURL, active)
 	if !ok || pr.State != "OPEN" {
 		return pr, ok
 	}

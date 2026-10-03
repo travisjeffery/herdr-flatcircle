@@ -331,21 +331,55 @@ func parseGates(out []byte, alias map[string]string, now time.Time) (map[string]
 	return gates, nil
 }
 
-// prForBead picks the PR a bead is being delivered through: one on the bead's
-// own branch first, else the last PR its notes link to. A bead worked on a
-// branch named for its Linear key (tj/eng-1102-…) is found through its notes.
-func prForBead(b Bead, branchPrefix string, mine []PR, byURL map[string]PR) (PR, bool) {
-	want := branchPrefix + agentName(b.ID)
+// prForBead picks the PR a bead is being delivered through, from the PRs on its
+// own branch and the PRs its notes link to. A bead worked on a branch named for
+// its Linear key (tj/eng-1102-…) is found through its notes, but a noted PR on
+// another active bead's branch is that bead's. An open PR wins, own branch
+// first, then the latest noted; with none open, the last to merge, so a bead
+// with several PRs settles on one pick instead of flipping between them and
+// is only told to close once none is open.
+func prForBead(b Bead, branchPrefix string, mine []PR, byURL map[string]PR, active []Bead) (PR, bool) {
+	var cands []PR
 	for _, pr := range mine {
-		if pr.Head == want || strings.HasPrefix(pr.Head, want+"-") {
-			return pr, true
+		if onBeadBranch(branchPrefix, pr.Head, b) {
+			cands = append(cands, pr)
 		}
 	}
 	urls := NotedPRs(b.Notes)
 	for i := len(urls) - 1; i >= 0; i-- {
-		if pr, ok := byURL[urls[i]]; ok {
-			return pr, true
+		pr, ok := byURL[urls[i]]
+		if !ok {
+			continue
+		}
+		if owner, ok := beadForBranch(branchPrefix, pr.Head, active); ok && owner.ID != b.ID {
+			continue
+		}
+		cands = append(cands, pr)
+	}
+	best, found := PR{}, false
+	for _, pr := range cands {
+		if !found || prRank(pr, best) {
+			best, found = pr, true
 		}
 	}
-	return PR{}, false
+	return best, found
+}
+
+// prRank reports whether a outranks b as a bead's PR: open beats merged beats
+// closed, and between merged PRs the later merge wins. Ties keep b, the
+// earlier candidate.
+func prRank(a, b PR) bool {
+	rank := func(pr PR) int {
+		switch pr.State {
+		case "OPEN":
+			return 2
+		case "MERGED":
+			return 1
+		}
+		return 0
+	}
+	if rank(a) != rank(b) {
+		return rank(a) > rank(b)
+	}
+	return a.State == "MERGED" && a.MergedAt.After(b.MergedAt)
 }

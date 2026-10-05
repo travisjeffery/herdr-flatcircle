@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -212,9 +213,27 @@ func (g GH) run(args ...string) ([]byte, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("gh %s: %v: %s", strings.Join(args[:min(2, len(args))], " "), err, strings.TrimSpace(stderr.String()))
+		return stdout.Bytes(), fmt.Errorf("gh %s: %v: %s", strings.Join(args[:min(2, len(args))], " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.Bytes(), nil
+}
+
+// graphql runs a query and keeps a partial answer: GitHub answers every alias
+// it can and errors the rest, such as a PR in a repository since deleted, and
+// gh exits 1 either way. Only an answer without data, such as a rate limit,
+// is an error.
+func (g GH) graphql(q string) ([]byte, error) {
+	out, err := g.run("api", "graphql", "-f", "query="+q)
+	if err == nil {
+		return out, nil
+	}
+	var resp struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	if json.Unmarshal(out, &resp) == nil && len(resp.Data) > 0 {
+		return out, nil
+	}
+	return nil, err
 }
 
 func (g GH) Login() string {
@@ -286,11 +305,66 @@ func (g GH) Gates(prs []PR, now time.Time) (map[string]MergeGate, error) {
 	if len(alias) == 0 {
 		return nil, nil
 	}
-	out, err := g.run("api", "graphql", "-f", "query={ "+q.String()+"}")
+	out, err := g.graphql("{ " + q.String() + "}")
 	if err != nil {
 		return nil, err
 	}
 	return parseGates(out, alias, now)
+}
+
+// lookupBatch caps the PRs one Lookup query asks for.
+const lookupBatch = 50
+
+// Lookup fetches the list fields of each PR, keyed by URL, in one GraphQL
+// query per lookupBatch PRs, where a gh pr view each would cost a point each.
+// A PR GitHub can't resolve is missing from the result.
+func (g GH) Lookup(urls []string) (map[string]PR, error) {
+	prs := map[string]PR{}
+	for chunk := range slices.Chunk(urls, lookupBatch) {
+		var q strings.Builder
+		alias := map[string]string{}
+		for i, u := range chunk {
+			m := prURL.FindStringSubmatch(u)
+			if m == nil {
+				continue
+			}
+			owner, name, _ := strings.Cut(m[1], "/")
+			a := fmt.Sprintf("p%d", i)
+			alias[a] = u
+			fmt.Fprintf(&q, "%s: repository(owner: %q, name: %q) { pullRequest(number: %s) { %s } } ", a, owner, name, m[2], lookupFields)
+		}
+		if len(alias) == 0 {
+			continue
+		}
+		out, err := g.graphql("{ " + q.String() + "}")
+		if err != nil {
+			return prs, err
+		}
+		if err := parseLookup(out, alias, prs); err != nil {
+			return prs, err
+		}
+	}
+	return prs, nil
+}
+
+// lookupFields are listFields in GraphQL.
+const lookupFields = "number title url headRefName state isDraft mergedAt"
+
+func parseLookup(out []byte, alias map[string]string, prs map[string]PR) error {
+	var resp struct {
+		Data map[string]*struct {
+			PullRequest *PR `json:"pullRequest"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(out, &resp); err != nil {
+		return err
+	}
+	for a, u := range alias {
+		if r := resp.Data[a]; r != nil && r.PullRequest != nil {
+			prs[u] = *r.PullRequest
+		}
+	}
+	return nil
 }
 
 func parseGates(out []byte, alias map[string]string, now time.Time) (map[string]MergeGate, error) {

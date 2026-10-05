@@ -25,6 +25,7 @@ type TickerState struct {
 	PRs          map[string]PR         `json:"prs"`                  // by bead id, from the last gh pass
 	MergedPRs    map[string][]PR       `json:"merged_prs,omitempty"` // each bead's merged PRs, from the last gh pass
 	Runs         map[string][]Run      `json:"runs"`                 // by bead id, from the last gh pass
+	Noted        map[string]PR         `json:"noted_prs,omitempty"`  // by URL: linked PRs outside the listings, from the last gh pass
 	LastNudge    time.Time             `json:"last_nudge"`
 	Login        string                `json:"login"`
 	CoordReady   time.Time             `json:"coord_ready"`
@@ -153,13 +154,14 @@ func (t Ticker) refreshPRs(st *TickerState, active []Bead) {
 			inList[pr.URL] = pr
 		}
 	}
+	noted := t.notedPRs(st, active, mine, inList)
 	owner := prOwner(t.cfg, active, mine)
 	// Each bead costs a gh pr view or two; run them a few at a time so a pass
 	// over dozens of beads doesn't take a minute.
 	found := make([]*PR, len(active))
 	merged := make([][]PR, len(active))
 	eachLimit(len(active), ghParallel, func(i int) {
-		pr, m, ok := t.beadPR(st, active[i], mine, inList, owner)
+		pr, m, ok := t.beadPR(st, active[i], mine, inList, noted, owner)
 		if ok {
 			found[i] = &pr
 		}
@@ -182,7 +184,7 @@ func (t Ticker) refreshPRs(st *TickerState, active []Bead) {
 // beadPR is the PR b is delivered through, in full detail when open, and b's
 // merged PRs; false when it has none or its detail can't be fetched and
 // nothing older stands in.
-func (t Ticker) beadPR(st *TickerState, b Bead, mine map[string][]PR, inList map[string]PR, owner func(PR) string) (PR, []PR, bool) {
+func (t Ticker) beadPR(st *TickerState, b Bead, mine map[string][]PR, inList, noted map[string]PR, owner func(PR) string) (PR, []PR, bool) {
 	own, listed := repoPRs(t.cfg, b, mine)
 	if !listed {
 		old, ok := st.PRs[b.ID]
@@ -192,7 +194,7 @@ func (t Ticker) beadPR(st *TickerState, b Bead, mine map[string][]PR, inList map
 	for _, u := range NotedPRs(b.Notes) {
 		if pr, ok := inList[u]; ok {
 			byURL[u] = pr
-		} else if pr, err := t.gh.View(u, false); err == nil {
+		} else if pr, ok := noted[u]; ok {
 			byURL[u] = pr
 		}
 	}
@@ -215,6 +217,56 @@ func (t Ticker) beadPR(st *TickerState, b Bead, mine map[string][]PR, inList map
 		return PR{}, merged, false
 	}
 	return old, merged, true
+}
+
+// notedPRs looks up, by URL, the PRs active beads' notes link that no repo
+// listing holds: another repository's, or one past the listing's 100.
+func (t Ticker) notedPRs(st *TickerState, active []Bead, mine map[string][]PR, inList map[string]PR) map[string]PR {
+	st.Noted = nextNoted(t.cfg, st.Noted, active, mine, inList, t.gh.Lookup, t.log.Printf)
+	return st.Noted
+}
+
+// nextNoted is notedPRs given the last pass's. Beads link dozens of PRs, and a
+// gh pr view each every pass spent most of the hourly GraphQL budget, so they
+// come in one batched lookup, and a PR already seen merged, which can't
+// change, isn't asked for again. When the lookup fails a PR keeps what the
+// last pass found.
+func nextNoted(cfg Config, prev map[string]PR, active []Bead, mine map[string][]PR, inList map[string]PR, lookup func([]string) (map[string]PR, error), logf func(string, ...any)) map[string]PR {
+	known := map[string]PR{}
+	var want []string
+	for _, b := range active {
+		if _, listed := repoPRs(cfg, b, mine); !listed {
+			continue
+		}
+		for _, u := range NotedPRs(b.Notes) {
+			if _, ok := inList[u]; ok {
+				continue
+			}
+			if _, ok := known[u]; ok || slices.Contains(want, u) {
+				continue
+			}
+			if pr, ok := prev[u]; ok && pr.State == "MERGED" {
+				known[u] = pr
+				continue
+			}
+			want = append(want, u)
+		}
+	}
+	if len(want) == 0 {
+		return known
+	}
+	got, err := lookup(want)
+	if err != nil {
+		logf("gh linked PRs: %v", err)
+	}
+	for _, u := range want {
+		if pr, ok := got[u]; ok {
+			known[u] = pr
+		} else if pr, ok := prev[u]; ok && err != nil {
+			known[u] = pr
+		}
+	}
+	return known
 }
 
 // ghParallel bounds the gh calls a pass makes at once.

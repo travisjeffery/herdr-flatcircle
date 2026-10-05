@@ -399,10 +399,11 @@ func applyVerdict(env verifyEnv, v verdict, now time.Time) error {
 	return nil
 }
 
-// GraphQLLeft is the user's remaining GitHub GraphQL points this hour; the
-// rate_limit endpoint itself costs none.
+// GraphQLLeft is the user's remaining GitHub GraphQL points this hour, for a
+// point. The free REST rate_limit endpoint can't stand in: its graphql
+// resource tracks another bucket and reads nearly full while this one is out.
 func (g GH) GraphQLLeft() (int, error) {
-	out, err := g.run("api", "rate_limit", "--jq", ".resources.graphql.remaining")
+	out, err := g.run("api", "graphql", "-f", "query={ rateLimit { remaining } }", "--jq", ".data.rateLimit.remaining")
 	if err != nil {
 		return 0, err
 	}
@@ -416,7 +417,7 @@ func (g GH) VerifyQuery(urls []string, searches map[string]string) (map[string]p
 	if q == "" {
 		return nil, nil, nil
 	}
-	out, err := g.run("api", "graphql", "-f", "query="+q)
+	out, err := g.graphql(q)
 	if err != nil {
 		return nil, nil, err
 	}

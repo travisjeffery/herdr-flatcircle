@@ -777,3 +777,66 @@ func TestNextRunsStopsFollowingFinishedRuns(t *testing.T) {
 		t.Fatalf("a run going from running to gone must not prompt, got %+v", o)
 	}
 }
+
+// A batched lookup answers what it can: an alias whose repository is gone is
+// null beside the others' data.
+func TestParseLookupKeepsPartialAnswer(t *testing.T) {
+	out := []byte(`{"data":{
+		"p0":{"pullRequest":{"number":7,"url":"https://github.com/o/r/pull/7","headRefName":"tj/x","state":"MERGED","mergedAt":"2026-10-01T00:00:00Z"}},
+		"p1":null},
+		"errors":[{"type":"NOT_FOUND","path":["p1"]}]}`)
+	alias := map[string]string{"p0": "https://github.com/o/r/pull/7", "p1": "https://github.com/o/gone/pull/1"}
+	prs := map[string]PR{}
+	if err := parseLookup(out, alias, prs); err != nil {
+		t.Fatal(err)
+	}
+	if len(prs) != 1 || prs[alias["p0"]].State != "MERGED" || prs[alias["p0"]].MergedAt.IsZero() {
+		t.Fatalf("got %+v", prs)
+	}
+}
+
+func TestNextNotedLooksUpOnlyWhatCanChange(t *testing.T) {
+	cfg := Config{Repo: "/src/app"}
+	const gh = "https://github.com/o/"
+	b := Bead{ID: "backend-ab12", Notes: "PR: " + gh + "app/pull/1\nPR: " + gh + "other/pull/2\nPR: " + gh + "other/pull/3\nagain " + gh + "other/pull/3"}
+	c := Bead{ID: "backend-cd34", Notes: "PR: " + gh + "other/pull/3\nPR: " + gh + "other/pull/4"}
+	mine := map[string][]PR{"/src/app": {{URL: gh + "app/pull/1", State: "OPEN"}}}
+	inList := map[string]PR{gh + "app/pull/1": mine["/src/app"][0]}
+	prev := map[string]PR{
+		gh + "other/pull/2": {URL: gh + "other/pull/2", State: "MERGED"},
+		gh + "other/pull/4": {URL: gh + "other/pull/4", State: "OPEN"},
+		gh + "other/pull/9": {URL: gh + "other/pull/9", State: "MERGED"},
+	}
+	var calls [][]string
+	lookup := func(urls []string) (map[string]PR, error) {
+		calls = append(calls, urls)
+		return map[string]PR{gh + "other/pull/3": {URL: gh + "other/pull/3", State: "OPEN"}}, nil
+	}
+	got := nextNoted(cfg, prev, []Bead{b, c}, mine, inList, lookup, func(string, ...any) {})
+	if len(calls) != 1 || !slices.Equal(calls[0], []string{gh + "other/pull/3", gh + "other/pull/4"}) {
+		t.Fatalf("lookups %v; want one batch of the PRs not listed and not merged", calls)
+	}
+	if got[gh+"other/pull/2"].State != "MERGED" || got[gh+"other/pull/3"].State != "OPEN" {
+		t.Fatalf("got %+v", got)
+	}
+	if _, ok := got[gh+"other/pull/4"]; ok {
+		t.Fatal("a PR the lookup no longer resolves must be dropped")
+	}
+	if _, ok := got[gh+"other/pull/9"]; ok || len(got) != 2 {
+		t.Fatalf("PRs no bead links any more must be dropped, got %+v", got)
+	}
+
+	// A failed lookup keeps what the last pass found.
+	failing := func([]string) (map[string]PR, error) { return nil, fmt.Errorf("rate limited") }
+	got = nextNoted(cfg, prev, []Bead{c}, mine, inList, failing, func(string, ...any) {})
+	if got[gh+"other/pull/4"].State != "OPEN" {
+		t.Fatalf("got %+v", got)
+	}
+
+	// A bead whose repo listing failed this pass looks nothing up.
+	calls = nil
+	nextNoted(cfg, prev, []Bead{b}, map[string][]PR{}, nil, lookup, func(string, ...any) {})
+	if len(calls) != 0 {
+		t.Fatalf("lookups %v", calls)
+	}
+}

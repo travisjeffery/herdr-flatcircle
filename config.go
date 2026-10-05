@@ -34,6 +34,9 @@ type Config struct {
 	// Only keys with these team prefixes count as Linear issues; empty accepts
 	// any key outside a small denylist.
 	LinearPrefixes []string `toml:"linear_prefixes"`
+	// LinearWorkspace is the workspace in Linear's URLs (linear.app/<it>/...),
+	// for opening an issue from the board when its bead links none.
+	LinearWorkspace string `toml:"linear_workspace"`
 	// VerifyMinutes is how often the ticker re-checks stale beads for work
 	// that is already done; 0 turns it off. Each pass rebuilds only what
 	// changed since the last, and each bead in full once a day.

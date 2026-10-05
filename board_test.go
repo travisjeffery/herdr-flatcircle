@@ -1,8 +1,11 @@
 package main
 
 import (
+	"regexp"
 	"slices"
+	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func testBoard() []boardRow {
@@ -115,5 +118,178 @@ func TestPastedFilterIsTypedAndKept(t *testing.T) {
 	}
 	if f.query != "widgets" || f.typing {
 		t.Fatalf("pasted filter = %+v, want widgets kept", f)
+	}
+}
+
+// testDetailRow is the first thread of testBoard as loadBoard builds it from a
+// ticker state: a picked PR with checks, a merged one, and a noted PR the
+// ticker never looked up.
+func testDetailRow() (boardRow, *beadDetail) {
+	r := testBoard()[1]
+	r.bead.Notes = "started\nPR: https://github.com/acme/widgets/pull/7\nRUN: make deploy\nwhy: needs prod creds\nPR: https://github.com/acme/other/pull/3"
+	r.run = "make deploy"
+	r.linear = "INF-42"
+	st := TickerState{
+		PRs: map[string]PR{r.bead.ID: {Number: 7, Title: "INF-42: Fix the thing", URL: "https://github.com/acme/widgets/pull/7", State: "OPEN", IsDraft: true,
+			MergeState: "BLOCKED", ReviewDecision: "REVIEW_REQUIRED",
+			Checks: []Check{{Name: "lint", Status: "COMPLETED", Conclusion: "FAILURE"}, {Name: "test", Status: "IN_PROGRESS"}, {Name: "build", Status: "COMPLETED", Conclusion: "SUCCESS"}}}},
+		MergedPRs: map[string][]PR{r.bead.ID: {{Number: 5, URL: "https://github.com/acme/widgets/pull/5", State: "MERGED", Title: "First half"}}},
+	}
+	r.prs = linkedPRs(st, r.bead)
+	r.moves = []string{"INF-42 → In Review (PR #7 open)"}
+	full := r.bead
+	full.Description = strings.Repeat("A long description line that wraps. ", 40)
+	full.Parent = "backend-ab"
+	full.Labels = []string{"repo:widgets"}
+	d := &beadDetail{
+		full:     &full,
+		tail:     tailLines("output one\n─────\n> prompt\n\n\n", detailTailLines),
+		tailDone: true,
+		inbox:    []InboxItem{{Event: Event{Bead: r.bead.ID, Kind: EventFailing, Summary: "PR #7 checks failing: lint", At: t0}}},
+	}
+	return r, d
+}
+
+func texts(lines []styledLine) []string {
+	var out []string
+	for _, l := range lines {
+		out = append(out, l.text)
+	}
+	return out
+}
+
+func TestLinkedPRs(t *testing.T) {
+	r, _ := testDetailRow()
+	var got []string
+	for _, pr := range r.prs {
+		got = append(got, prSummary(pr))
+	}
+	want := []string{
+		"acme/widgets#7 · open · draft · blocked · review required · checks 1 failing (lint), 1 running, 1 passed",
+		"acme/widgets#5 · merged",
+		"acme/other#3 · not looked up yet", // noted, never looked up: still openable
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("linked PRs =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	// A noted PR the ticker did look up comes from noted_prs.
+	st := TickerState{Noted: map[string]PR{"https://github.com/acme/other/pull/3": {Number: 3, URL: "https://github.com/acme/other/pull/3", State: "CLOSED"}}}
+	if prs := linkedPRs(st, r.bead); len(prs) != 2 || prs[1].State != "CLOSED" {
+		t.Fatalf("noted lookup = %+v", prs)
+	}
+}
+
+func TestDetailLines(t *testing.T) {
+	r, d := testDetailRow()
+	got := strings.Join(texts(detailLines(r, d, 80)), "\n")
+	for _, want := range []string{
+		"backend-ab12 · in_progress · P0 · labels repo:widgets · parent backend-ab",
+		"Fix the thing",
+		"Description\n  A long description",
+		"  … 10 more lines (s shows all)",
+		"Latest note (4 earlier)\n  PR: https://github.com/acme/other/pull/3",
+		"  run: make deploy (p copies)",
+		"PRs\n  acme/widgets#7 · open · draft",
+		"    INF-42: Fix the thing",
+		"Linear\n  INF-42\n  expected: INF-42 → In Review (PR #7 open)",
+		"Agent backend-ab12 · claude working\n  output one\n  > prompt\n",
+		"Inbox (1)\n  " + t0.Local().Format("15:04") + " [checks_failing] PR #7 checks failing: lint",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("detail lacks %q:\n%s", want, got)
+		}
+	}
+	if n := strings.Count(got, "A long description line"); n == 0 {
+		t.Fatal("no description")
+	}
+}
+
+func TestDetailLinesLoading(t *testing.T) {
+	r, _ := testDetailRow()
+	got := strings.Join(texts(detailLines(r, nil, 80)), "\n")
+	for _, want := range []string{"Description\n  loading…", "claude working\n  reading…"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("loading detail lacks %q:\n%s", want, got)
+		}
+	}
+	// A working agent whose read failed shows nothing rather than an error.
+	got = strings.Join(texts(detailLines(r, &beadDetail{tailDone: true}, 80)), "\n")
+	if !strings.HasSuffix(got, "claude working") {
+		t.Errorf("failed read of a working agent:\n%s", got)
+	}
+}
+
+func TestDetailLinesNarrow(t *testing.T) {
+	r, d := testDetailRow()
+	for _, w := range []int{20, 33} {
+		for _, l := range detailLines(r, d, w) {
+			// The agent's screen is cut at draw time, not wrapped.
+			if n := utf8.RuneCountInString(l.text); n > w && !strings.HasPrefix(l.text, "  output") {
+				t.Errorf("width %d: %d-rune line %q", w, n, l.text)
+			}
+		}
+	}
+}
+
+var ansiSeq = regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]`)
+
+func TestRenderBoardWithDetail(t *testing.T) {
+	r, d := testDetailRow()
+	rows := testBoard()
+	rows[1] = r
+	const w, hgt = 60, 15
+	screen := renderBoard(rows, 1, "", boardFilter{}, detailLines(r, d, w), w, hgt)
+	// The status and hint lines are placed by cursor moves, not newlines.
+	screen = regexp.MustCompile(`\x1b\[\d+;1H`).ReplaceAllString(screen, "\r\n")
+	lines := strings.Split(ansiSeq.ReplaceAllString(screen, ""), "\r\n")
+	// body is 12 lines: the list gets a third, 4 of its 6 rows.
+	if !strings.HasPrefix(lines[0], "threads") || !strings.Contains(lines[1], "backend-ab12") || !strings.HasPrefix(lines[4], "───") {
+		t.Fatalf("list then rule, got:\n%s", strings.Join(lines[:5], "\n"))
+	}
+	if !strings.Contains(screen, "… more below (s shows the bead in full)") {
+		t.Error("an overflowing pane doesn't say it was cut")
+	}
+	if !strings.Contains(screen, "J/K scroll  o open PR  l Linear  s bd show") {
+		t.Error("no detail key hint")
+	}
+	for _, l := range lines {
+		if n := utf8.RuneCountInString(l); n > w {
+			t.Errorf("%d-rune line %q", n, l)
+		}
+	}
+	// Without a pane, the list keeps the whole body.
+	if plain := renderBoard(rows, 1, "", boardFilter{}, nil, w, hgt); strings.Contains(plain, "───") {
+		t.Error("rule drawn without a pane")
+	}
+}
+
+func TestTailLines(t *testing.T) {
+	screen := "one\ntwo  \n╭────╮\n│    │\nthree\n  ⏵⏵ auto mode on\n\n\n"
+	if got := tailLines(screen, 3); !slices.Equal(got, []string{"two", "three", "  ⏵⏵ auto mode on"}) {
+		t.Fatalf("tailLines = %q", got)
+	}
+	if got := tailLines("", 3); len(got) != 0 {
+		t.Fatalf("empty screen = %q", got)
+	}
+}
+
+func TestLinearURL(t *testing.T) {
+	notes := "Linear: https://linear.app/acme/issue/INF-9/other\nLinear: https://linear.app/acme/issue/INF-42/fix-the-thing"
+	if got := linearURL("INF-42", notes, "fallback"); got != "https://linear.app/acme/issue/INF-42" {
+		t.Errorf("noted link = %q", got)
+	}
+	if got := linearURL("INF-7", notes, "acme"); got != "https://linear.app/acme/issue/INF-7" {
+		t.Errorf("built link = %q", got)
+	}
+	if got := linearURL("INF-7", "", ""); got != "" {
+		t.Errorf("no workspace = %q", got)
+	}
+}
+
+func TestWrap(t *testing.T) {
+	got := wrap("the quick brown fox\n\nhttps://example.com/long", 10)
+	want := []string{"the quick", "brown fox", "", "https://ex", "ample.com/", "long"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("wrap = %q, want %q", got, want)
 	}
 }

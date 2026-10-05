@@ -10,6 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 )
 
@@ -23,6 +24,11 @@ type boardRow struct {
 	// search is the lowercased text '/' matches: id, title, agent, state,
 	// PR, Linear key and the section the row sits in.
 	search string
+	// prs, linear and moves are for the detail pane: the bead's PRs as the
+	// ticker last saw them, its Linear key and where that issue should be.
+	prs    []PR
+	linear string
+	moves  []string
 }
 
 func searchText(parts ...string) string {
@@ -73,7 +79,8 @@ func loadBoard(cfg Config) ([]boardRow, error) {
 	var rows []boardRow
 	rows = append(rows, boardRow{header: "threads"})
 	for _, th := range threads {
-		r := boardRow{bead: th.Bead, agent: th.Agent, line: stateLine(th), color: groupColor(classify(th)), run: runCommand(th)}
+		r := boardRow{bead: th.Bead, agent: th.Agent, line: stateLine(th), color: groupColor(classify(th)), run: runCommand(th),
+			prs: linkedPRs(st, th.Bead), linear: th.Linear, moves: linearMoves([]Thread{th})}
 		agent, pr := "", ""
 		if th.Agent != nil {
 			agent = th.Agent.Name
@@ -90,7 +97,8 @@ func loadBoard(cfg Config) ([]boardRow, error) {
 	for _, b := range next {
 		seen[b.ID] = true
 		line := fmt.Sprintf("P%d %s", b.Priority, b.Type)
-		rows = append(rows, boardRow{bead: b, line: line, color: ansiCyan, search: searchText("next", b.ID, b.Title, line)})
+		rows = append(rows, boardRow{bead: b, line: line, color: ansiCyan, search: searchText("next", b.ID, b.Title, line),
+			prs: linkedPRs(st, b), linear: linearKey(b, cfg.LinearPrefixes)})
 	}
 	ready, _ := Beads{}.Ready()
 	rows = append(rows, boardRow{header: "ready"})
@@ -101,7 +109,8 @@ func loadBoard(cfg Config) ([]boardRow, error) {
 		}
 		n++
 		line := fmt.Sprintf("P%d %s", b.Priority, b.Type)
-		rows = append(rows, boardRow{bead: b, line: line, color: ansiDim, search: searchText("ready", b.ID, b.Title, line)})
+		rows = append(rows, boardRow{bead: b, line: line, color: ansiDim, search: searchText("ready", b.ID, b.Title, line),
+			prs: linkedPRs(st, b), linear: linearKey(b, cfg.LinearPrefixes)})
 	}
 	return rows, nil
 }
@@ -213,6 +222,19 @@ func nextSelectable(rows []boardRow, from, dir int) int {
 	return -1
 }
 
+// waitInput waits up to timeout ms (-1: forever) for a key on fd. Polling
+// rather than a reader goroutine leaves stdin alone while a pager has it.
+func waitInput(fd, timeout int) (bool, error) {
+	fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+	for {
+		n, err := unix.Poll(fds, timeout)
+		if err == unix.EINTR {
+			continue
+		}
+		return n > 0, err
+	}
+}
+
 func runBoard(cfg Config) error {
 	fd := int(os.Stdin.Fd())
 	old, err := term.MakeRaw(fd)
@@ -239,12 +261,74 @@ func runBoard(cfg Config) error {
 		rows = filterRows(all, filter.query)
 		cur = nextSelectable(rows, 0, 1)
 	}
+	// The detail pane, while open, shows the selected bead and follows the
+	// selection. details caches each bead's slow lookups until a refresh;
+	// pending counts those still running.
+	showDetail := false
+	// scroll is how far the pane is scrolled down; it starts over on each bead.
+	scroll, scrolledOn := 0, ""
+	details := map[string]*beadDetail{}
+	results := make(chan detailResult, 16)
+	pending := 0
+	sel := func() *boardRow {
+		if cur < 0 || cur >= len(rows) {
+			return nil
+		}
+		return &rows[cur]
+	}
+	detail := func() *beadDetail {
+		r := sel()
+		if !showDetail || r == nil {
+			return nil
+		}
+		d, ok := details[r.bead.ID]
+		if !ok {
+			d = &beadDetail{inbox: beadInbox(r.bead.ID)}
+			details[r.bead.ID] = d
+			pending += loadDetail(h, *r, results)
+		}
+		return d
+	}
+	draw := func() {
+		var lines []styledLine
+		if d := detail(); d != nil {
+			if id := sel().bead.ID; id != scrolledOn {
+				scroll, scrolledOn = 0, id
+			}
+			lines = detailLines(*sel(), d, termWidth())
+			scroll = min(scroll, len(lines)-1)
+			lines = lines[scroll:]
+		}
+		drawBoard(rows, cur, status, filter, lines)
+	}
 	buf := make([]byte, 256)
 	var keys []string
 	var partial []byte
 	for {
 		if len(keys) == 0 {
-			drawBoard(rows, cur, status, filter)
+			draw()
+			timeout := -1
+			if pending > 0 {
+				timeout = 100
+			}
+			ready, err := waitInput(fd, timeout)
+			if err != nil {
+				return err
+			}
+			for drained := false; !drained; {
+				select {
+				case res := <-results:
+					pending--
+					if d, ok := details[res.id]; ok {
+						res.apply(d)
+					}
+				default:
+					drained = true
+				}
+			}
+			if !ready {
+				continue
+			}
 			n, err := os.Stdin.Read(buf)
 			if err != nil {
 				return err
@@ -266,12 +350,6 @@ func runBoard(cfg Config) error {
 			}
 			continue
 		}
-		sel := func() *boardRow {
-			if cur < 0 || cur >= len(rows) {
-				return nil
-			}
-			return &rows[cur]
-		}
 		reload := func() {
 			if r, err := loadBoard(cfg); err == nil {
 				all = r
@@ -279,11 +357,55 @@ func runBoard(cfg Config) error {
 				if cur >= len(rows) || cur < 0 || rows[cur].header != "" {
 					cur = nextSelectable(rows, 0, 1)
 				}
+				// Results still running land on no entry and are dropped.
+				details = map[string]*beadDetail{}
 			} else {
 				status = err.Error()
 			}
 		}
+		if showDetail {
+			handled := true
+			switch key {
+			case "\x1b", "q", " ", "v":
+				showDetail = false
+			case "J", "\x1b[6~":
+				scroll += 5
+			case "K", "\x1b[5~":
+				scroll = max(0, scroll-5)
+			case "o":
+				if r := sel(); r != nil && len(r.prs) > 0 {
+					status = openURL(r.prs[0].URL)
+				} else {
+					status = "no PR known"
+				}
+			case "l":
+				if r := sel(); r != nil {
+					status = openLinear(cfg, *r)
+				}
+			case "s":
+				if r := sel(); r != nil {
+					fmt.Print("\x1b[?25h\x1b[?1049l")
+					term.Restore(fd, old)
+					if err := pageBead(r.bead.ID); err != nil {
+						status = err.Error()
+					}
+					if _, err := term.MakeRaw(fd); err != nil {
+						return err
+					}
+					fmt.Print("\x1b[?1049h\x1b[?25l")
+				}
+			default:
+				handled = false
+			}
+			if handled {
+				continue
+			}
+		}
 		switch key {
+		case " ", "v":
+			if sel() != nil {
+				showDetail = true
+			}
 		case "/":
 			filter.typing = true
 		case "\x1b":
@@ -322,7 +444,7 @@ func runBoard(cfg Config) error {
 				kind = "codex"
 			}
 			status = "starting " + r.bead.ID + "…"
-			drawBoard(rows, cur, status, filter)
+			drawBoard(rows, cur, status, filter, nil)
 			msg, err := dispatch(cfg, h, r.bead.ID, DispatchOpts{Kind: kind, Focus: true})
 			if err != nil {
 				status = err.Error()
@@ -350,6 +472,18 @@ func runBoard(cfg Config) error {
 	}
 }
 
+// openLinear opens the row's Linear issue in the browser.
+func openLinear(cfg Config, r boardRow) string {
+	if r.linear == "" {
+		return "no Linear issue known"
+	}
+	u := linearURL(r.linear, r.bead.Notes, cfg.LinearWorkspace)
+	if u == "" {
+		return "set linear_workspace in config.toml to open " + r.linear
+	}
+	return openURL(u)
+}
+
 func copyText(text, done string) string {
 	if err := exec.Command("wl-copy", text).Run(); err != nil {
 		return "wl-copy: " + err.Error()
@@ -366,11 +500,26 @@ func statusFor(rows []boardRow, cur int, status string) string {
 	return "run: " + rows[cur].run + "  (p copies)"
 }
 
-func drawBoard(rows []boardRow, cur int, status string, filter boardFilter) {
+func termWidth() int {
+	w, _, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil {
+		return 100
+	}
+	return w
+}
+
+func drawBoard(rows []boardRow, cur int, status string, filter boardFilter, detail []styledLine) {
 	w, hgt, err := term.GetSize(int(os.Stdout.Fd()))
 	if err != nil {
 		w, hgt = 100, 30
 	}
+	fmt.Print(renderBoard(rows, cur, status, filter, detail, w, hgt))
+}
+
+// renderBoard is the whole screen for a w×hgt terminal. With detail lines the
+// list shrinks to a third of the body, around the selection, and the detail
+// pane fills the rest.
+func renderBoard(rows []boardRow, cur int, status string, filter boardFilter, detail []styledLine, w, hgt int) string {
 	var s strings.Builder
 	s.WriteString("\x1b[H\x1b[2J")
 	body := hgt - 3
@@ -378,13 +527,17 @@ func drawBoard(rows []boardRow, cur int, status string, filter boardFilter) {
 		fmt.Fprintf(&s, "%s%s%s\r\n", ansiCyan, fit(line, w), ansiReset)
 		body--
 	}
+	listH := body
+	if detail != nil {
+		listH = min(len(rows), max(3, body/3))
+	}
 	start := 0
-	if cur >= body {
-		start = cur - body + 1
+	if cur >= listH {
+		start = cur - listH + 1
 	}
 	stateW := min(34, max(12, w/3))
 	titleW := w - 2 - 17 - stateW - 1
-	for i := start; i < len(rows) && i-start < body; i++ {
+	for i := start; i < len(rows) && i-start < listH; i++ {
 		r := rows[i]
 		if r.header != "" {
 			fmt.Fprintf(&s, "%s%s%s\r\n", ansiBold, fit(r.header, w), ansiReset)
@@ -402,13 +555,29 @@ func drawBoard(rows []boardRow, cur int, status string, filter boardFilter) {
 			fmt.Fprintf(&s, "  %s%s%s%s%s\r\n", id, r.color, state, ansiReset, title)
 		}
 	}
+	if detail != nil {
+		fmt.Fprintf(&s, "%s%s%s\r\n", ansiDim, strings.Repeat("─", max(w, 1)), ansiReset)
+		room := body - min(listH, len(rows)-start) - 1
+		if len(detail) > room && room > 0 {
+			detail = append(detail[:room-1:room-1], styledLine{"… more below (s shows the bead in full)", ansiDim})
+		}
+		for i, l := range detail {
+			if i >= room {
+				break
+			}
+			fmt.Fprintf(&s, "%s%s%s\r\n", l.style, fit(l.text, w), ansiReset)
+		}
+	}
 	fmt.Fprintf(&s, "\x1b[%d;1H%s%s%s", hgt-1, ansiRed, fit(statusFor(rows, cur, status), w-1), ansiReset)
-	hint := "↵ focus/start  c claude  x codex  n next  y copy  p copy command  / filter  r refresh  q quit"
-	if filter.typing {
+	hint := "↵ focus/start  space detail  c claude  x codex  n next  y copy  p copy command  / filter  r refresh  q quit"
+	switch {
+	case filter.typing:
 		hint = "type to filter  ↵ keep  esc clear  ⌫ edit"
+	case detail != nil:
+		hint = "j/k move  J/K scroll  o open PR  l Linear  s bd show  ↵ focus/start  esc/space back"
 	}
 	fmt.Fprintf(&s, "\x1b[%d;1H%s%s%s", hgt, ansiDim, fit(hint, w-1), ansiReset)
-	fmt.Print(s.String())
+	return s.String()
 }
 
 // filterLine is the header shown while a filter is being typed or kept.

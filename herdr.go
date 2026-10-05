@@ -61,8 +61,8 @@ func pinSocket(env []string, socket string) []string {
 	return append(out, "HERDR_SOCKET_PATH="+socket)
 }
 
-// call runs a herdr API command and returns its .result object.
-func (h Herdr) call(timeout time.Duration, args ...string) (json.RawMessage, error) {
+// output runs a herdr command and returns what it printed.
+func (h Herdr) output(timeout time.Duration, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, h.bin, args...)
@@ -74,14 +74,23 @@ func (h Herdr) call(timeout time.Duration, args ...string) (json.RawMessage, err
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("herdr %s: %v: %s", strings.Join(args[:min(2, len(args))], " "), err, strings.TrimSpace(stderr.String()))
 	}
+	return stdout.Bytes(), nil
+}
+
+// call runs a herdr API command and returns its .result object.
+func (h Herdr) call(timeout time.Duration, args ...string) (json.RawMessage, error) {
+	out, err := h.output(timeout, args...)
+	if err != nil {
+		return nil, err
+	}
 	// Some commands (pane report-metadata) print nothing on success.
-	if len(bytes.TrimSpace(stdout.Bytes())) == 0 {
+	if len(bytes.TrimSpace(out)) == 0 {
 		return json.RawMessage("{}"), nil
 	}
 	var env struct {
 		Result json.RawMessage `json:"result"`
 	}
-	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+	if err := json.Unmarshal(out, &env); err != nil {
 		return nil, fmt.Errorf("herdr %s: decoding: %w", strings.Join(args[:min(2, len(args))], " "), err)
 	}
 	return env.Result, nil
@@ -242,6 +251,12 @@ func (h Herdr) Panes(workspace string) ([]Pane, error) {
 func (h Herdr) Prompt(target, text string) error {
 	_, err := h.call(callTimeout, "agent", "prompt", target, text)
 	return err
+}
+
+// Read is the last lines of what an agent's pane shows, as plain text.
+func (h Herdr) Read(target string, lines int, timeout time.Duration) (string, error) {
+	out, err := h.output(timeout, "agent", "read", target, "--source", "visible", "--lines", strconv.Itoa(lines), "--format", "text")
+	return string(out), err
 }
 
 func (h Herdr) Rename(pane, name string) error {

@@ -348,6 +348,18 @@ you type, matching bead id, title, agent, state, PR number or repo and Linear
 key (every word, any case); `↵` keeps the filter and goes back to the keys
 above, which then act on the filtered rows, and `esc` clears it.
 
+`space` (or `v`) opens a detail pane under the list for the selected bead, and
+it follows `j`/`k`: status, priority, labels, parent and the start of the
+description; the latest note in full (the needs_me question or `RUN:` command)
+with a count of earlier ones; every linked PR with its state, merge state,
+review decision and checks; the Linear key and where the issue should be; the
+agent's status and the last lines of its screen; and the bead's inbox items.
+PRs come from the ticker's last pass, so the pane never calls GitHub; the
+description and the agent's screen load in the background. In the pane `o`
+opens the PR, `l` the Linear issue (set `linear_workspace` unless the bead's
+notes link it), `s` shows `bd show` in `$PAGER`, `J`/`K` scroll, `↵` focuses
+or starts as in the list, and `esc`, `q` or `space` go back.
+
 ## Getting started
 
 Once it's installed (see below), the first ten minutes:
@@ -462,6 +474,7 @@ nudge = true              # prompt the coordinator when there's news
 auto_resolve = false      # remove a merged, closed bead's worktree automatically
 repos = { infra = "~/src/infra", model = "~/src/model" }
 linear_prefixes = ["ENG"] # Linear team keys to recognise; empty accepts any KEY-123
+linear_workspace = "acme" # linear.app/<this>/issue/KEY: where the board's `l` opens issues
 herdr_socket = "~/.config/herdr/herdr.sock"  # the herdr server the coordinator runs on
 verify_minutes = 60       # how often to re-check stale beads; 0 turns it off
 stale_days = 3            # a bead untouched this long is checked

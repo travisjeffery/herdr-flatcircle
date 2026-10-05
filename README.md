@@ -69,7 +69,13 @@ nudges the coordinator; the coordinator reads the inbox through
    delivers it once the agent is ready.
 3. **The worker works and writes to its bead.** Findings and decisions go in
    `bd note`. It notes `PR: <url>` when it opens a PR and any Actions run URL
-   it's waiting on. When it needs a decision, it writes the question and sets
+   it's waiting on. It turns on auto-merge (`gh pr merge <url> --auto
+   --squash`) for each PR once it isn't a draft, so an approved PR with
+   passing checks merges without anyone clicking merge. Who has to approve is
+   up to the repo's own rules (required reviews, code owners, automated
+   reviewers), which auto-merge still waits for. A PR that needs a human
+   decision has it off, and a repo that doesn't allow auto-merge gets a note
+   on the bead. When it needs a decision, it writes the question and sets
    the bead to `needs_me`. When it needs you to run a command, it writes
    `RUN: <command>` and sets `needs_me`. After a merge with steps left, it adds
    the `rolling-out` label.
@@ -83,7 +89,10 @@ nudges the coordinator; the coordinator reads the inbox through
      `review · PR #411 approved · ENG-1024`, and the agent view sorts what
      needs you to the top.
    - **The worker:** failing checks, new review feedback, a PR ready to merge,
-     a merge or a finished run become a prompt to that worker. Prompts wait until the worker has
+     auto-merge turned off, a merge or a finished run become a prompt to that
+     worker. GitHub turns auto-merge off when the base branch changes or
+     someone without write access pushes; while the PR is open, not a draft
+     and not waiting on you, the worker is asked to turn it back on. Prompts wait until the worker has
      been idle for `idle_seconds`, so they never land in the middle of
      something, and several are sent together.
    - **The inbox:** each change is also an event file for the coordinator.
@@ -142,7 +151,7 @@ Every automated message says it isn't from you, and none approves anything.
 | From → to | When | Starts with |
 |---|---|---|
 | dispatch → worker | Once, at start | `You are the flatcircle worker for bead …` |
-| ticker → worker | Checks fail, review feedback, ready to merge, merge, run finished | `[flatcircle: automated, not the user] PR #N …` |
+| ticker → worker | Checks fail, review feedback, ready to merge, auto-merge turned off, merge, run finished | `[flatcircle: automated, not the user] PR #N …` |
 | resume → worker | After `flatcircle resume` | `[flatcircle] You were resumed after your agent exited.` |
 | ticker → coordinator | New inbox items and the coordinator is idle | `[flatcircle ticker: automated, not the user, approves nothing] N new inbox item(s).` |
 | worker → everyone | Any time | A note on its bead (`bd note`), or a status change |
@@ -154,7 +163,8 @@ UNSTABLE, no checks running, no unresolved review thread that a push hasn't
 outdated, and, when approved, an approval of the head commit within 7 days;
 once per head commit; otherwise the board shows
 `approved but blocked: 3 open threads, stale approval`), `merged`,
-`run_succeeded`, `run_failed`, `finished` (a worker finished a turn),
+`auto_merge_off` (GitHub turned off a PR's auto-merge), `run_succeeded`,
+`run_failed`, `finished` (a worker finished a turn),
 `agent_gone` (its agent exited) and `closed`.
 
 ### Features in detail

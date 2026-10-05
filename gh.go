@@ -25,9 +25,16 @@ type PR struct {
 	Checks         []Check   `json:"statusCheckRollup"`
 	Reviews        []Review  `json:"reviews"`
 	MergedAt       time.Time `json:"mergedAt"`
+	// AutoMerge is set while auto-merge is on.
+	AutoMerge *AutoMerge `json:"autoMergeRequest"`
 	// Gate is what readyToMerge needs beyond gh pr view, fetched only for PRs
 	// that are otherwise mergeable.
 	Gate *MergeGate `json:"gate,omitempty"`
+}
+
+// AutoMerge is a PR's pending auto-merge request.
+type AutoMerge struct {
+	Method string `json:"mergeMethod"`
 }
 
 // MergeGate is a PR's review state at one head: what GitHub's reviewDecision
@@ -75,7 +82,7 @@ func (r Review) isBot() bool { return r.Bot || strings.HasSuffix(r.Author.Login,
 // listFields stay light: statusCheckRollup across 100 PRs in a repo with many
 // checks per PR makes GitHub's GraphQL time out (504).
 const listFields = "number,title,url,headRefName,state,isDraft,mergedAt"
-const detailFields = listFields + ",reviewDecision,statusCheckRollup,reviews,headRefOid,mergeStateStatus"
+const detailFields = listFields + ",reviewDecision,statusCheckRollup,reviews,headRefOid,mergeStateStatus,autoMergeRequest"
 
 type Checks struct {
 	Failing []string

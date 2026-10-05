@@ -187,6 +187,9 @@ type Snapshot struct {
 	// own PR's state.
 	Merged        []string `json:"merged,omitempty"`
 	MergedTracked bool     `json:"merged_tracked,omitempty"`
+	// AutoMerge is the URL of the open PR last seen with auto-merge on, so the
+	// worker hears once when GitHub turns it off.
+	AutoMerge string `json:"auto_merge,omitempty"`
 }
 
 type EventKind string
@@ -204,6 +207,7 @@ const (
 	EventRunFailed    EventKind = "run_failed"
 	EventLikelyStale  EventKind = "likely_stale"
 	EventAutoClosed   EventKind = "auto_closed"
+	EventAutoMergeOff EventKind = "auto_merge_off"
 )
 
 type Event struct {
@@ -250,6 +254,9 @@ func snapshot(t Thread, prev Snapshot, now time.Time) Snapshot {
 		s.PRNumber, s.PRState = t.PR.Number, t.PR.State
 		if k := readyKey(t); k != "" {
 			s.ReadyKey = k
+		}
+		if t.PR.State == "OPEN" && t.PR.AutoMerge != nil {
+			s.AutoMerge = t.PR.URL
 		}
 	}
 	return s
@@ -307,9 +314,24 @@ func transition(t Thread, prev Snapshot, first bool, now time.Time) Outcome {
 		if k := readyKey(t); k != "" && k != prev.ReadyKey {
 			o.Notify = true
 			ev(EventReady, "PR #%d is ready to merge (%s)", t.PR.Number, approval(t.PR))
+			if t.PR.AutoMerge != nil {
+				o.Prompts = append(o.Prompts, fmt.Sprintf(
+					readyPrompt+"%d is ready to merge at %s: %s, no review thread is open, and its required checks passed. Auto-merge is on, so GitHub merges it; don't merge it yourself. Finish anything left before merge (the Linear issue, your report). The ticker tells you when it merges.",
+					t.PR.Number, t.PR.HeadSHA, approval(t.PR)))
+			} else {
+				o.Prompts = append(o.Prompts, fmt.Sprintf(
+					readyPrompt+"%d is ready to merge at %s: %s, no review thread is open, and its required checks passed. Finish anything left before merge (the Linear issue, your report), then merge it with `gh pr merge %d --match-head-commit %s` only if you were told to merge; otherwise say it is ready to merge and stop. The ticker tells you when it merges.",
+					t.PR.Number, t.PR.HeadSHA, approval(t.PR), t.PR.Number, t.PR.HeadSHA))
+			}
+		}
+		// GitHub turns auto-merge off when the base branch changes or someone
+		// without write access pushes. A draft or a PR waiting on a human
+		// decision is meant to have it off.
+		if prev.AutoMerge != "" && prev.AutoMerge == t.PR.URL && t.PR.AutoMerge == nil && !t.PR.IsDraft && t.Bead.Status != StatusNeedsMe {
+			ev(EventAutoMergeOff, "PR #%d auto-merge was turned off", t.PR.Number)
 			o.Prompts = append(o.Prompts, fmt.Sprintf(
-				readyPrompt+"%d is ready to merge at %s: %s, no review thread is open, and its required checks passed. Finish anything left before merge (the Linear issue, your report), then merge it with `gh pr merge %d --match-head-commit %s` only if you were told to merge; otherwise say it is ready to merge and stop. The ticker tells you when it merges.",
-				t.PR.Number, t.PR.HeadSHA, approval(t.PR), t.PR.Number, t.PR.HeadSHA))
+				"[flatcircle: automated, not the user] PR #%d no longer has auto-merge on; GitHub turns it off when the base branch changes or someone without write access pushes. Unless you turned it off on purpose, turn it back on with `gh pr merge %s --auto --squash`.",
+				t.PR.Number, t.PR.URL))
 		}
 	}
 	if news := newlyMerged(t, prev); len(news) > 0 {

@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -50,6 +51,18 @@ func (g GH) RunView(repo, id string) (Run, error) {
 }
 
 func (t Ticker) refreshRuns(st *TickerState, active []Bead) {
+	st.Runs = nextRuns(st.Runs, active, t.gh.RunView, t.log.Printf)
+}
+
+// runGone is the conclusion recorded for a run GitHub no longer has: it is
+// completed, so it is not followed again, and neither succeeded nor failed.
+const runGone = "gone"
+
+// nextRuns looks up each run the active beads' notes mention. A run already
+// recorded as completed is kept without asking GitHub again, unless it failed,
+// since a rerun reuses its id; a run GitHub answers 404 for (deleted by
+// retention) is recorded as gone.
+func nextRuns(prev map[string][]Run, active []Bead, view func(repo, id string) (Run, error), logf func(string, ...any)) map[string][]Run {
 	type ref struct{ bead, url string }
 	var refs []ref
 	for _, b := range active {
@@ -61,14 +74,30 @@ func (t Ticker) refreshRuns(st *TickerState, active []Bead) {
 	eachLimit(len(refs), ghParallel, func(i int) {
 		id, u := refs[i].bead, refs[i].url
 		m := runURL.FindStringSubmatch(u)
-		r, err := t.gh.RunView(m[1], m[2])
-		if err != nil {
-			t.log.Printf("gh run view %s: %v", u, err)
-			j := slices.IndexFunc(st.Runs[id], func(old Run) bool { return runKey(old) == m[2] })
-			if j < 0 {
+		var old *Run
+		if j := slices.IndexFunc(prev[id], func(r Run) bool { return runKey(r) == m[2] }); j >= 0 {
+			old = &prev[id][j]
+		}
+		if old != nil && old.Status == "completed" && !runFailed(*old) {
+			found[i] = old
+			return
+		}
+		r, err := view(m[1], m[2])
+		switch {
+		case err != nil && strings.Contains(err.Error(), "HTTP 404"):
+			logf("gh run view %s: gone, no longer following it", u)
+			r = Run{Repo: m[1], URL: u}
+			if old != nil {
+				r = *old
+			}
+			r.ID, _ = strconv.ParseInt(m[2], 10, 64)
+			r.Status, r.Conclusion = "completed", runGone
+		case err != nil:
+			logf("gh run view %s: %v", u, err)
+			if old == nil {
 				return
 			}
-			r = st.Runs[id][j]
+			r = *old
 		}
 		found[i] = &r
 	})
@@ -78,7 +107,7 @@ func (t Ticker) refreshRuns(st *TickerState, active []Bead) {
 			runs[refs[i].bead] = append(runs[refs[i].bead], *r)
 		}
 	}
-	st.Runs = runs
+	return runs
 }
 
 func runKey(r Run) string   { return strconv.FormatInt(r.ID, 10) }

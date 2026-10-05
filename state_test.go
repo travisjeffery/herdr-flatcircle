@@ -2,8 +2,10 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -725,5 +727,53 @@ func TestQueuedReadyPromptDroppedWhenHeadMoves(t *testing.T) {
 	s := snapshot(thread(bead(StatusInProgress), agent("working", 1), pushed), prev, t0.Add(2*time.Minute))
 	if !slices.Equal(s.Pending, []string{"other prompt"}) {
 		t.Fatalf("stale ready prompt kept: %+v", s.Pending)
+	}
+}
+
+func TestNextRunsStopsFollowingFinishedRuns(t *testing.T) {
+	const base = "https://github.com/acme/app/actions/runs/"
+	b := Bead{ID: "backend-ab12", Notes: "deploy " + base + "1\ncanary " + base + "2\nretry " + base + "3"}
+	other := Bead{ID: "backend-cd34", Notes: "new " + base + "4"}
+	prev := map[string][]Run{b.ID: {
+		{ID: 1, Status: "completed", Conclusion: "success", Workflow: "Deploy", Repo: "acme/app"},
+		{ID: 2, Status: "in_progress", Workflow: "Canary", Repo: "acme/app"},
+		{ID: 3, Status: "completed", Conclusion: "failure", Workflow: "Provision", Repo: "acme/app"},
+	}}
+	var mu sync.Mutex
+	var viewed []string
+	view := func(repo, id string) (Run, error) {
+		mu.Lock()
+		viewed = append(viewed, id)
+		mu.Unlock()
+		if id == "3" {
+			return Run{ID: 3, Status: "in_progress", Workflow: "Provision", Repo: repo}, nil
+		}
+		return Run{}, fmt.Errorf("gh run view: exit status 1: HTTP 404: Not Found")
+	}
+	all := nextRuns(prev, []Bead{b, other}, view, func(string, ...any) {})
+	got := append(all[b.ID], all[other.ID]...)
+	slices.Sort(viewed)
+	if !slices.Equal(viewed, []string{"2", "3", "4"}) {
+		t.Fatalf("viewed %v; a succeeded run must not be polled, a failed one must (rerun)", viewed)
+	}
+	if len(got) != 4 || got[0].Conclusion != "success" || got[2].Status != "in_progress" {
+		t.Fatalf("got %+v", got)
+	}
+	for _, r := range []Run{got[1], got[3]} {
+		if r.Status != "completed" || r.Conclusion != runGone {
+			t.Fatalf("a 404 run must be recorded gone, got %+v", r)
+		}
+	}
+	if got[1].Workflow != "Canary" || got[3].ID != 4 || got[3].URL != base+"4" {
+		t.Fatalf("gone runs keep what was known: %+v %+v", got[1], got[3])
+	}
+	viewed = nil
+	nextRuns(all, []Bead{b, other}, view, func(string, ...any) {})
+	if !slices.Equal(viewed, []string{"3"}) {
+		t.Fatalf("gone runs must not be polled again, viewed %v", viewed)
+	}
+	o := transition(runThread(got[1]), snapshot(runThread(prev[b.ID][1]), Snapshot{PRNumber: 7, PRState: "MERGED"}, t0), false, t0)
+	if len(o.Events) != 0 || len(o.Prompts) != 0 || o.Notify {
+		t.Fatalf("a run going from running to gone must not prompt, got %+v", o)
 	}
 }

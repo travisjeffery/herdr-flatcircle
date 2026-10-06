@@ -71,6 +71,13 @@ func TestStatusWarnings(t *testing.T) {
 		t.Errorf("verify off: want no verify warning, got %q", ws)
 	}
 
+	// The running ticker's intervals beat an edited config it hasn't loaded.
+	slow := late
+	slow.Intervals = &Intervals{Tick: time.Minute, GH: 5 * time.Minute, Verify: 0}
+	if ws := statusWarnings(cfg, slow, now); len(ws) != 0 {
+		t.Errorf("within the running ticker's intervals: want no warnings, got %q", ws)
+	}
+
 	if ws := statusWarnings(cfg, TickerState{}, now); !has(ws, "no tick recorded") || len(ws) != 1 {
 		t.Errorf("empty state: want only the no-tick warning, got %q", ws)
 	}
@@ -86,6 +93,11 @@ func TestStatusWarnings(t *testing.T) {
 	if ws := statusWarnings(cfg, low, now); !has(ws, "verify paused: 812 GitHub GraphQL points left (10m ago), below gh_min_remaining 1000") {
 		t.Errorf("low budget: got %q", ws)
 	}
+	low.Intervals = &Intervals{Tick: cfg.tick(), GH: cfg.ghEvery()}
+	if ws := statusWarnings(cfg, low, now); has(ws, "verify paused") {
+		t.Errorf("verify off in the running ticker: want no budget warning, got %q", ws)
+	}
+	low.Intervals = nil
 	low.GHLeftAt = now.Add(-61 * time.Minute)
 	if ws := statusWarnings(cfg, low, now); has(ws, "verify paused") {
 		t.Errorf("budget reading older than its hourly reset: want no warning, got %q", ws)

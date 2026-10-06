@@ -39,6 +39,19 @@ type TickerState struct {
 	GHLeft       int                   `json:"gh_left"`      // GraphQL points left, as of GHLeftAt
 	GHLeftAt     time.Time             `json:"gh_left_at"`   // when a verify pass last read GHLeft
 	LastBeat     time.Time             `json:"last_heartbeat"`
+	// Intervals are the running ticker's, which a config edit since it
+	// started doesn't change: status measures lateness against these.
+	Intervals *Intervals `json:"intervals,omitempty"`
+}
+
+type Intervals struct {
+	Tick   time.Duration `json:"tick"`
+	GH     time.Duration `json:"gh"`
+	Verify time.Duration `json:"verify"`
+}
+
+func intervalsOf(cfg Config) Intervals {
+	return Intervals{Tick: cfg.tick(), GH: cfg.ghEvery(), Verify: cfg.verifyEvery()}
 }
 
 func statePath() string { return filepath.Join(stateDir(), "state.json") }
@@ -366,6 +379,8 @@ func (t Ticker) once(st *TickerState) error {
 	// Only a pass that got its data counts: a ticker failing every pass shows
 	// as late in `ticker status`.
 	st.LastTick = now
+	iv := intervalsOf(t.cfg)
+	st.Intervals = &iv
 	// Worktrees are listed with the PR pass, not every tick.
 	if st.LastGH.Equal(now) {
 		t.fixNames(st)
@@ -440,10 +455,12 @@ func (t Ticker) once(st *TickerState) error {
 		t.verify(st, now)
 	}
 	t.nudgeCoordinator(st, agents, now)
-	if heartbeatDue(t.cfg, *st, now) {
+	// A fresh clock: verify or a nudge can take a while, and the pass-start
+	// time would put a heartbeat off for a whole extra pass.
+	if beat := time.Now(); heartbeatDue(t.cfg, *st, beat) {
 		inbox, _ := readInbox()
-		t.log.Print(heartbeatLine(threads, len(inbox), *st, now))
-		st.LastBeat = now
+		t.log.Print(heartbeatLine(threads, len(inbox), *st, beat))
+		st.LastBeat = beat
 	}
 	return nil
 }

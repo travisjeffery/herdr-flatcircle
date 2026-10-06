@@ -36,8 +36,10 @@ func statusAges(st TickerState, now time.Time) string {
 const lateFactor = 3
 
 // statusWarnings is what `ticker status` flags: a pass that has stopped
-// running, gh failing, or verify paused for GitHub budget. Nudges run only
-// when there is news, so their age is never a warning.
+// running, gh failing, or verify paused for GitHub budget. Lateness is
+// measured against the running ticker's intervals, or cfg's before it has
+// recorded them. Nudges run only when there is news, so their age is never a
+// warning.
 func statusWarnings(cfg Config, st TickerState, now time.Time) []string {
 	var out []string
 	late := func(name string, last time.Time, every time.Duration) {
@@ -51,14 +53,18 @@ func statusWarnings(cfg Config, st TickerState, now time.Time) []string {
 	if st.LastTick.IsZero() {
 		out = append(out, "no tick recorded yet: the ticker predates last_tick or no pass has succeeded")
 	}
-	late("tick", st.LastTick, cfg.tick())
-	late("gh pass", st.LastGH, cfg.ghEvery())
-	late("verify pass", st.LastVerify, cfg.verifyEvery())
+	iv := intervalsOf(cfg)
+	if st.Intervals != nil {
+		iv = *st.Intervals
+	}
+	late("tick", st.LastTick, iv.Tick)
+	late("gh pass", st.LastGH, iv.GH)
+	late("verify pass", st.LastVerify, iv.Verify)
 	if !st.GHFailingFor.IsZero() {
 		out = append(out, fmt.Sprintf("gh PR listing failing since %s (%s)", ago(st.GHFailingFor, now), strings.Join(st.GHFailingIn, ", ")))
 	}
 	// GitHub's GraphQL budget resets hourly; an older reading says nothing.
-	if !st.GHLeftAt.IsZero() && now.Sub(st.GHLeftAt) < time.Hour && st.GHLeft < cfg.GHMinRemaining {
+	if iv.Verify > 0 && !st.GHLeftAt.IsZero() && now.Sub(st.GHLeftAt) < time.Hour && st.GHLeft < cfg.GHMinRemaining {
 		out = append(out, fmt.Sprintf("verify paused: %d GitHub GraphQL points left (%s), below gh_min_remaining %d", st.GHLeft, ago(st.GHLeftAt, now), cfg.GHMinRemaining))
 	}
 	return out

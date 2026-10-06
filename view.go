@@ -12,13 +12,13 @@ import (
 
 // A "plugin:<id>" source makes the view plugin-owned: herdr clears it itself
 // when the plugin is unlinked, uninstalled or disabled, so it cannot outlive
-// flatcircle the way herdr-projects' plain-source view did.
+// quartermaster the way herdr-projects' plain-source view did.
 const (
 	viewSource = "plugin:" + toolName
 	viewLabel  = toolName
 )
 
-// legacyViewSources are cleared too: kelpie's and shepherd's plugin views from
+// legacyViewSources are cleared too: flatcircle's, kelpie's and shepherd's plugin views from
 // before the renames, and a view set under a bare name by hand.
 var legacyViewSources = func() []string {
 	out := []string{toolName}
@@ -95,12 +95,12 @@ type viewSpec struct {
 	Sort   []viewSort `json:"sort"`
 }
 
-// flatcircleView sorts threads by the ticker's sh_rank token ("<group>-<bead>",
+// quartermasterView sorts threads by the ticker's sh_rank token ("<group>-<bead>",
 // needs you first). Herdr orders an agent without the token after every agent
 // with it, so non-thread agents follow the threads and nothing is hidden. A
 // view's sort replaces agent_panel_sort, so attention and recency come back as
 // tie-breakers.
-func flatcircleView() viewSpec {
+func quartermasterView() viewSpec {
 	return viewSpec{
 		Source: viewSource,
 		Label:  viewLabel,
@@ -112,14 +112,14 @@ func flatcircleView() viewSpec {
 	}
 }
 
-// setView installs flatcircle's view. Herdr holds a single view and a set
+// setView installs quartermaster's view. Herdr holds a single view and a set
 // replaces it, so calling this on every startup or configure is idempotent.
 func setView(c rpc) error {
-	_, err := c.Call("agent.view.set", flatcircleView())
+	_, err := c.Call("agent.view.set", quartermasterView())
 	return err
 }
 
-// clearView removes flatcircle's view and leaves any other source's view alone.
+// clearView removes quartermaster's view and leaves any other source's view alone.
 func clearView(c rpc) error {
 	for _, source := range append([]string{viewSource}, legacyViewSources...) {
 		if _, err := c.Call("agent.view.clear", map[string]string{"source": source}); err != nil {
@@ -129,7 +129,7 @@ func clearView(c rpc) error {
 	return nil
 }
 
-// unconfigure removes everything flatcircle put into herdr: its view and the
+// unconfigure removes everything quartermaster put into herdr: its view and the
 // sidebar tokens on every agent pane.
 func unconfigure(c rpc, agents func() ([]Agent, error), clearTokens func(pane string)) error {
 	if err := clearView(c); err != nil {

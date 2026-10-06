@@ -192,7 +192,7 @@ func TestPRForBeadSkipsChildBranches(t *testing.T) {
 	mine := []PR{
 		{Number: 2, Head: "tj/backend-qkvu-2-inf-1247-radar-rules"},
 		{Number: 10, Head: "tj/backend-qkvu-10-follow-up"},
-		{Number: 1, Head: "tj/backend-qkvu-flatcircle-thing"},
+		{Number: 1, Head: "tj/backend-qkvu-quartermaster-thing"},
 		{Number: 71, Head: "tj/backend-cw9f-7-1-nested"},
 		{Number: 7, Head: "tj/backend-cw9f-7-sweep"},
 	}
@@ -201,7 +201,7 @@ func TestPRForBeadSkipsChildBranches(t *testing.T) {
 		title string
 		want  int
 	}{
-		{"backend-qkvu", "flatcircle thing", 1},
+		{"backend-qkvu", "quartermaster thing", 1},
 		{"backend-qkvu.2", "inf-1247 radar rules", 2},
 		{"backend-qkvu.10", "follow up", 10},
 		{"backend-cw9f.7", "sweep", 7},
@@ -217,7 +217,7 @@ func TestPRForBeadSkipsChildBranches(t *testing.T) {
 	if pr, _, ok := prForBead(Bead{ID: "backend-qkvu"}, "tj/", mine[:2], nil, nil); ok {
 		t.Errorf("parent matched child PR #%d", pr.Number)
 	}
-	// The exact branch flatcircle names for a bead counts even when its slug
+	// The exact branch quartermaster names for a bead counts even when its slug
 	// starts with digits.
 	b := Bead{ID: "backend-qkvu", Title: "2 things"}
 	if pr, _, ok := prForBead(b, "tj/", []PR{{Number: 5, Head: "tj/backend-qkvu-2-things"}}, nil, nil); !ok || pr.Number != 5 {
@@ -394,7 +394,7 @@ func TestRunSucceededPromptsNextStep(t *testing.T) {
 	if len(o.Events) != 1 || o.Events[0].Kind != EventRunSucceeded || o.Notify {
 		t.Fatalf("want one run_succeeded event and no notification, got %+v", o)
 	}
-	want := "[flatcircle: automated, not the user] Deploy run https://github.com/acme/app/actions/runs/42 succeeded. Continue with the next step of the rollout."
+	want := "[quartermaster: automated, not the user] Deploy run https://github.com/acme/app/actions/runs/42 succeeded. Continue with the next step of the rollout."
 	if len(o.Prompts) != 1 || o.Prompts[0] != want {
 		t.Fatalf("got prompts %q", o.Prompts)
 	}
@@ -723,7 +723,7 @@ func TestQueuedReadyPromptDroppedWhenHeadMoves(t *testing.T) {
 	pushed.HeadSHA, pushed.MergeState = "bbb", "BLOCKED"
 	pushed.Checks = append(pushed.Checks, Check{Name: "e2e", Status: "IN_PROGRESS"})
 	// One queued by the kelpie ticker, before the rename, is dropped too.
-	prev.Pending = append(prev.Pending, strings.Replace(o.Prompts[0], "[flatcircle:", "[kelpie:", 1), "other prompt")
+	prev.Pending = append(prev.Pending, strings.Replace(o.Prompts[0], "[quartermaster:", "[kelpie:", 1), "other prompt")
 	s := snapshot(thread(bead(StatusInProgress), agent("working", 1), pushed), prev, t0.Add(2*time.Minute))
 	if !slices.Equal(s.Pending, []string{"other prompt"}) {
 		t.Fatalf("stale ready prompt kept: %+v", s.Pending)

@@ -137,7 +137,7 @@ func TestAgentStartPassesResumeArgsAfterDashes(t *testing.T) {
 }
 
 func TestContextSplitsNoAgentThreads(t *testing.T) {
-	t.Setenv("FLATCIRCLE_STATE_DIR", t.TempDir())
+	t.Setenv("QUARTERMASTER_STATE_DIR", t.TempDir())
 	threads := []Thread{
 		{Bead: Bead{ID: "backend-wt", Status: StatusInProgress, UpdatedAt: t0.Add(-time.Hour)}},
 		{Bead: Bead{ID: "backend-old", Status: StatusInProgress, UpdatedAt: t0.Add(-30 * 24 * time.Hour)}},
@@ -145,8 +145,8 @@ func TestContextSplitsNoAgentThreads(t *testing.T) {
 	}
 	out := renderContext(Config{Repo: "/r"}, threads, nil, nil, nil, TickerState{}, map[string]bool{"backend-wt": true}, t0)
 	for _, want := range []string{
-		"- resumable (1): backend-wt  → flatcircle resume\n",
-		"- stale claims (2): backend-old, backend-older — no agent, no worktree, no PR, untouched 7d+  → flatcircle stale\n",
+		"- resumable (1): backend-wt  → quartermaster resume\n",
+		"- stale claims (2): backend-old, backend-older — no agent, no worktree, no PR, untouched 7d+  → quartermaster stale\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)

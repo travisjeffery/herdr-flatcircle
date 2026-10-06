@@ -1,34 +1,34 @@
 #!/bin/sh
-# Herdr runs this as the plugin's build step. It puts the flatcircle binary at
-# bin/flatcircle (with bin/kelpie and bin/shepherd, the deprecated old names,
-# linked to it): the
+# Herdr runs this as the plugin's build step. It puts the quartermaster binary
+# at bin/quartermaster (with bin/qm, its short alias, and bin/flatcircle,
+# bin/kelpie and bin/shepherd, the deprecated old names, linked to it): the
 # prebuilt release named by herdr-plugin.toml's version, checked against the
 # release's SHA256SUMS, or `go build` when there is no such release, it can't
 # be verified, or this checkout isn't that release.
 #
-#   FLATCIRCLE_BUILD=source   always build from source (KELPIE_BUILD and
-#                             SHEPHERD_BUILD still work)
+#   QUARTERMASTER_BUILD=source   always build from source (FLATCIRCLE_BUILD,
+#                                KELPIE_BUILD and SHEPHERD_BUILD still work)
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
-say() { printf 'flatcircle build: %s\n' "$*" >&2; }
+say() { printf 'quartermaster build: %s\n' "$*" >&2; }
 
 from_source() {
   say "$1; building from source"
   command -v go >/dev/null 2>&1 || { say "go is not installed; install Go 1.26+ or use a tagged release"; exit 1; }
-  mkdir -p bin && go build -o bin/flatcircle . || exit 1
+  mkdir -p bin && go build -o bin/quartermaster . || exit 1
   alias_old_names
   exit 0
 }
 
-# kelpie and shepherd are old names; links to them (~/.local/bin/kelpie) keep
-# working through these, and flatcircle prints a deprecation notice when run by
-# one.
+# qm is the short alias. flatcircle, kelpie and shepherd are old names; links
+# to them (~/.local/bin/flatcircle) keep working through these, and
+# quartermaster prints a deprecation notice when run by one.
 alias_old_names() {
-  for old in kelpie shepherd; do ln -sfn flatcircle "bin/$old"; done
+  for alias in qm flatcircle kelpie shepherd; do ln -sfn quartermaster "bin/$alias"; done
 }
 
-[ "${FLATCIRCLE_BUILD:-${KELPIE_BUILD:-${SHEPHERD_BUILD:-}}}" = source ] && from_source "FLATCIRCLE_BUILD=source"
+[ "${QUARTERMASTER_BUILD:-${FLATCIRCLE_BUILD:-${KELPIE_BUILD:-${SHEPHERD_BUILD:-}}}}" = source ] && from_source "QUARTERMASTER_BUILD=source"
 
 version=$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' herdr-plugin.toml | head -n 1)
 [ -n "$version" ] || from_source "herdr-plugin.toml has no version"
@@ -59,8 +59,8 @@ case "$(uname -m)" in
   arm64 | aarch64) arch=arm64 ;;
   *) from_source "no prebuilt binary for $(uname -m)" ;;
 esac
-asset="flatcircle-$os-$arch"
-base="https://github.com/travisjeffery/herdr-flatcircle/releases/download/$tag"
+asset="quartermaster-$os-$arch"
+base="https://github.com/travisjeffery/herdr-quartermaster/releases/download/$tag"
 
 if command -v curl >/dev/null 2>&1; then
   fetch() { curl -fsSL --retry 2 --connect-timeout 10 -o "$2" "$1"; }
@@ -86,6 +86,6 @@ want=$(awk -v f="$asset" '$2 == f {print $1}' "$tmp/SHA256SUMS")
 [ -n "$want" ] || from_source "SHA256SUMS has no entry for $asset"
 [ "$(sum "$tmp/$asset")" = "$want" ] || from_source "$asset does not match SHA256SUMS"
 
-mkdir -p bin && chmod +x "$tmp/$asset" && mv "$tmp/$asset" bin/flatcircle
+mkdir -p bin && chmod +x "$tmp/$asset" && mv "$tmp/$asset" bin/quartermaster
 alias_old_names
 say "installed $asset $tag"

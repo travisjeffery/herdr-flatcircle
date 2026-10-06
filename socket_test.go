@@ -59,7 +59,7 @@ func TestTickerHerdrCallsFollowConfiguredSocket(t *testing.T) {
 }
 
 func TestRunningSocket(t *testing.T) {
-	t.Setenv("FLATCIRCLE_STATE_DIR", t.TempDir())
+	t.Setenv("QUARTERMASTER_STATE_DIR", t.TempDir())
 	if err := os.WriteFile(socketFile(), []byte("/coord.sock\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestSocketWarning(t *testing.T) {
 }
 
 func TestRunningPIDIgnoresReusedPID(t *testing.T) {
-	t.Setenv("FLATCIRCLE_STATE_DIR", t.TempDir())
+	t.Setenv("QUARTERMASTER_STATE_DIR", t.TempDir())
 	other := exec.Command("sleep", "30")
 	if err := other.Start(); err != nil {
 		t.Fatal(err)
@@ -108,10 +108,10 @@ func TestRunningPIDIgnoresReusedPID(t *testing.T) {
 
 func TestTickerArgs(t *testing.T) {
 	for args, want := range map[string]bool{
-		"/home/tj/.config/herdr/plugins/flatcircle/bin/flatcircle ticker run\n": true,
-		"flatcircle ticker run":    true,
-		"sleep 30":                 false,
-		"flatcircle ticker status": false,
+		"/home/tj/.config/herdr/plugins/quartermaster/bin/quartermaster ticker run\n": true,
+		"quartermaster ticker run":    true,
+		"sleep 30":                    false,
+		"quartermaster ticker status": false,
 	} {
 		if got := tickerArgs(args); got != want {
 			t.Errorf("tickerArgs(%q) = %v", args, got)

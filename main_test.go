@@ -12,7 +12,7 @@ import (
 // os.UserConfigDir prefers XDG_CONFIG_HOME, and an unisolated migration test
 // once moved a live config dir. Tests that need other dirs set their own.
 func TestMain(m *testing.M) {
-	home, err := os.MkdirTemp("", "flatcircle-test-home")
+	home, err := os.MkdirTemp("", "quartermaster-test-home")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

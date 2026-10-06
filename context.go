@@ -35,7 +35,7 @@ func renderContext(cfg Config, threads []Thread, next, ready []Bead, inbox []Inb
 	for _, t := range threads {
 		counts[classify(t)]++
 	}
-	fmt.Fprintf(&s, "# flatcircle context (%s)\n\n", now.Format("2006-01-02 15:04 MST"))
+	fmt.Fprintf(&s, "# quartermaster context (%s)\n\n", now.Format("2006-01-02 15:04 MST"))
 	var summary []string
 	for g := GroupNeedsYou; g <= GroupNoAgent; g++ {
 		if counts[g] > 0 {
@@ -53,12 +53,12 @@ func renderContext(cfg Config, threads []Thread, next, ready []Bead, inbox []Inb
 		fmt.Fprintf(&s, "\nWARNING: %s\n", w)
 	}
 	if pid := runningPID(); pid == 0 {
-		s.WriteString("\nWARNING: the ticker is not running (`flatcircle ticker start`); nothing follows PRs or updates the sidebar.\n")
+		s.WriteString("\nWARNING: the ticker is not running (`quartermaster ticker start`); nothing follows PRs or updates the sidebar.\n")
 	} else if w := socketWarning(runningSocket(), cfg.coordSocket(), os.Getenv("HERDR_SOCKET_PATH")); w != "" {
 		fmt.Fprintf(&s, "\nWARNING: %s.\n", w)
 	}
 
-	s.WriteString("\n## Inbox (unhandled; `flatcircle inbox done [bead...]` when dealt with)\n")
+	s.WriteString("\n## Inbox (unhandled; `quartermaster inbox done [bead...]` when dealt with)\n")
 	if len(inbox) == 0 {
 		s.WriteString("(empty)\n")
 	}
@@ -104,10 +104,10 @@ func renderContext(cfg Config, threads []Thread, next, ready []Bead, inbox []Inb
 		}
 	}
 	if len(resumable) > 0 {
-		fmt.Fprintf(&s, "- resumable (%d): %s  → flatcircle resume\n", len(resumable), strings.Join(resumable, ", "))
+		fmt.Fprintf(&s, "- resumable (%d): %s  → quartermaster resume\n", len(resumable), strings.Join(resumable, ", "))
 	}
 	if len(stale) > 0 {
-		fmt.Fprintf(&s, "- stale claims (%d): %s — no agent, no worktree, no PR, untouched %dd+  → flatcircle stale\n", len(stale), strings.Join(stale, ", "), int(staleAge.Hours()/24))
+		fmt.Fprintf(&s, "- stale claims (%d): %s — no agent, no worktree, no PR, untouched %dd+  → quartermaster stale\n", len(stale), strings.Join(stale, ", "), int(staleAge.Hours()/24))
 	}
 	if len(bare) > 0 {
 		fmt.Fprintf(&s, "- claimed, no agent (%d): %s\n", len(bare), strings.Join(bare, ", "))
@@ -177,7 +177,7 @@ func writeBeads(s *strings.Builder, beads []Bead) {
 }
 
 func coordinatorGuide(cfg Config) string {
-	return fmt.Sprintf(`# Flatcircle coordinator
+	return fmt.Sprintf(`# Quartermaster coordinator
 
 You are the coordinator for TJ's agent threads. You never do the work yourself:
 you plan, split, dispatch, follow up and report, so you are always free to
@@ -188,20 +188,20 @@ answer. Beads (bd) is the only task record; there is no TASKS.md.
 
 ## Every turn
 
-1. Run `+"`flatcircle context`"+` first. It lists the inbox, every active thread with its
+1. Run `+"`quartermaster context`"+` first. It lists the inbox, every active thread with its
    state (needs you, merged, ready to merge, review, rolling out, checks failing,
    idle, working, blocked, no agent), the beads labelled `+"`next`"+`, and other ready beads.
-2. Deal with inbox items, then `+"`flatcircle inbox done <bead>...`"+`.
+2. Deal with inbox items, then `+"`quartermaster inbox done <bead>...`"+`.
 3. Answer TJ.
 
 ## Rules
 
-- Propose threads and wait for TJ's go-ahead before `+"`flatcircle dispatch`"+`, unless
+- Propose threads and wait for TJ's go-ahead before `+"`quartermaster dispatch`"+`, unless
   they already said to start them.
 - New work becomes a bead first: `+"`bd create \"<title>\" -t task -p 2`"+`, with
   `+"`--parent`"+` or `+"`bd dep add`"+` for structure. Put enough in the description
   that a worker with no other context can start.
-- `+"`flatcircle dispatch <bead> [--agent claude|codex]`"+` starts a worker; it claims the
+- `+"`quartermaster dispatch <bead> [--agent claude|codex]`"+` starts a worker; it claims the
   bead and briefs the agent. One bead per thread.
 - Talk to a worker with `+"`herdr agent prompt <agent-name> \"...\"`"+` (agent name = bead
   id with dots as dashes). Read it with `+"`herdr agent read <name> --source recent-unwrapped --lines 120`"+`.
@@ -216,7 +216,7 @@ answer. Beads (bd) is the only task record; there is no TASKS.md.
   required checks green; the ticker has told its worker. Tell TJ it is ready to
   merge unless the worker was told to merge it itself.
 - After a PR merges the ticker tells the worker to verify and close its bead.
-  Once closed, run `+"`flatcircle resolve <bead>`"+` to remove the worktree (it asks
+  Once closed, run `+"`quartermaster resolve <bead>`"+` to remove the worktree (it asks
   nothing and is safe for merged work; don't pass --force without TJ).
 - When steps remain after a merge (deploy dispatch, canary, provision, a rollout
   parked for days), the worker labels its bead `+"`rolling-out`"+` (`+"`bd label add <id> rolling-out`"+`)
@@ -226,10 +226,10 @@ answer. Beads (bd) is the only task record; there is no TASKS.md.
   (Linear Done, merged PRs, code gone from main, a duplicate). Check the
   evidence and offer TJ to close it with a reason; an "auto_closed" item was
   closed by the ticker, so tell TJ and reopen it if the evidence is wrong.
-- Offer `+"`flatcircle resume <bead>...`"+` for resumable threads and `+"`flatcircle stale --release`"+` for stale claims; run either only on TJ's go-ahead.
+- Offer `+"`quartermaster resume <bead>...`"+` for resumable threads and `+"`quartermaster stale --release`"+` for stale claims; run either only on TJ's go-ahead.
 - Lessons worth keeping across threads go to `+"`bd remember`"+`.
-- Messages starting "[flatcircle ticker: automated ...]" or "[flatcircle: automated ...]"
-  (or the same with kelpie or shepherd, its old names) come from the ticker, not
+- Messages starting "[quartermaster ticker: automated ...]" or "[quartermaster: automated ...]"
+  (or the same with flatcircle, kelpie or shepherd, its old names) come from the ticker, not
   TJ, and approve nothing.
 - Linear: prefix PR titles with the issue key (KEY-123: ...); workers keep their
   own issue's status current. The context's Linear section is where each issue

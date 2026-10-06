@@ -1,6 +1,6 @@
-id = "flatcircle"
-name = "Flatcircle"
-version = "0.4.0"
+id = "quartermaster"
+name = "Quartermaster"
+version = "0.5.0"
 min_herdr_version = "0.9.1"
 description = "One coordinator, a worktree and agent per bead, beads as the only record."
 platforms = ["linux", "macos"]
@@ -9,42 +9,42 @@ platforms = ["linux", "macos"]
 command = ["sh", "scripts/build.sh"]
 
 [[startup]]
-command = ["bin/flatcircle", "startup"]
+command = ["bin/quartermaster", "startup"]
 
 [[actions]]
 id = "configure"
-title = "Flatcircle: set up (config for this workspace's repo, CLI link, agent view)"
+title = "Quartermaster: set up (config for this workspace's repo, CLI link, agent view)"
 contexts = ["workspace"]
-command = ["bin/flatcircle", "configure"]
+command = ["bin/quartermaster", "configure"]
 
 [[actions]]
 id = "board"
-title = "Flatcircle: board"
+title = "Quartermaster: board"
 contexts = ["global", "workspace"]
-command = ["bin/flatcircle", "action", "board"]
+command = ["bin/quartermaster", "action", "board"]
 
 [[actions]]
 id = "coordinator"
-title = "Flatcircle: open the coordinator"
+title = "Quartermaster: open the coordinator"
 contexts = ["global", "workspace"]
-command = ["bin/flatcircle", "coordinator"]
+command = ["bin/quartermaster", "coordinator"]
 
 [[actions]]
 id = "focus-clipboard"
-title = "Flatcircle: focus or start the bead on the clipboard"
+title = "Quartermaster: focus or start the bead on the clipboard"
 contexts = ["global", "workspace"]
-command = ["bin/flatcircle", "focus"]
+command = ["bin/quartermaster", "focus"]
 
 [[actions]]
 id = "focus-clipboard-codex"
-title = "Flatcircle: focus or start the bead on the clipboard (Codex)"
+title = "Quartermaster: focus or start the bead on the clipboard (Codex)"
 contexts = ["global", "workspace"]
-command = ["bin/flatcircle", "focus", "--agent", "codex"]
+command = ["bin/quartermaster", "focus", "--agent", "codex"]
 
 [[panes]]
 id = "board"
-title = "Flatcircle"
+title = "Quartermaster"
 placement = "popup"
 width = "85%"
 height = "80%"
-command = ["bin/flatcircle", "board"]
+command = ["bin/quartermaster", "board"]

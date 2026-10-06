@@ -188,7 +188,7 @@ func TestSweepAbortsWhenAgentsCannotBeListed(t *testing.T) {
 func TestSweepKeepsActiveBeadsWorktrees(t *testing.T) {
 	f := newFakeSweep()
 	// tj/a matches by PR head (a differently named branch); tj/backend-r1-… by
-	// flatcircle's naming. Both are merged and clean but their beads are live.
+	// quartermaster's naming. Both are merged and clean but their beads are live.
 	f.active = []Bead{{ID: "backend-r1", Title: "Rollout", Status: StatusInProgress}, {ID: "backend-x9", Status: StatusInProgress}}
 	f.heads = map[string]string{"tj/a": "backend-x9"}
 	wts := []Worktree{

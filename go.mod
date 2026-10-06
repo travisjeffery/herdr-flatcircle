@@ -1,4 +1,4 @@
-module github.com/travisjeffery/herdr-flatcircle
+module github.com/travisjeffery/herdr-quartermaster
 
 go 1.26.7
 

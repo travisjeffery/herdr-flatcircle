@@ -79,17 +79,22 @@ func defaultConfig() Config {
 }
 
 // toolName names the binary, the config and state dirs, the ticker and the
-// coordinator. The tool was called kelpie, and shepherd before that; those
-// names, newest first, are deprecated aliases and the places old config and
-// state are migrated from.
-const toolName = "flatcircle"
+// coordinator. The tool was called flatcircle, kelpie before that, and
+// shepherd before that; those names, newest first, are deprecated aliases and
+// the places old config and state are migrated from.
+const toolName = "quartermaster"
 
-var legacyNames = []string{"kelpie", "shepherd"}
+// shortName is toolName's short alias (~/.local/bin/qm, bin/qm): the same
+// binary under another name, not a deprecated one.
+const shortName = "qm"
+
+var legacyNames = []string{"flatcircle", "kelpie", "shepherd"}
 
 func isLegacyName(name string) bool { return slices.Contains(legacyNames, name) }
 
 // envNames is the variable named after this tool and after each old name, so
-// FLATCIRCLE_STATE_DIR, KELPIE_STATE_DIR and SHEPHERD_STATE_DIR all work.
+// QUARTERMASTER_STATE_DIR, FLATCIRCLE_STATE_DIR, KELPIE_STATE_DIR and
+// SHEPHERD_STATE_DIR all work.
 func envNames(suffix string) []string {
 	out := []string{strings.ToUpper(toolName) + "_" + suffix}
 	for _, n := range legacyNames {
@@ -131,7 +136,7 @@ func envDir(keys ...string) string {
 	return ""
 }
 
-// pickDir is base/flatcircle, or the newest legacy dir under base while only
+// pickDir is base/quartermaster, or the newest legacy dir under base while only
 // that one exists (a migration that could not move it).
 func pickDir(base string) string {
 	dir := filepath.Join(base, toolName)
@@ -145,10 +150,11 @@ func pickDir(base string) string {
 	return dir
 }
 
-// migrateDirs moves kelpie's or shepherd's config and state to flatcircle's
-// paths. Directories set through the environment are left where they are. A
-// shepherd link left by the kelpie migration keeps working through the kelpie
-// link this one leaves.
+// migrateDirs moves flatcircle's, kelpie's or shepherd's config and state to
+// quartermaster's paths. Directories set through the environment are left
+// where they are. Links left by earlier migrations (kelpie -> flatcircle,
+// shepherd -> kelpie) keep working through the flatcircle link this one
+// leaves.
 func migrateDirs() []string {
 	var out []string
 	for _, d := range []struct{ env, base string }{{"CONFIG_DIR", configBase()}, {"STATE_DIR", stateBase()}} {
@@ -209,7 +215,7 @@ func loadConfig() (Config, error) {
 	return cfg, nil
 }
 
-var errNoRepo = errors.New("set repo in " + filepath.Join(configDir(), "config.toml") + ", or run `flatcircle configure --repo <path>`")
+var errNoRepo = errors.New("set repo in " + filepath.Join(configDir(), "config.toml") + ", or run `quartermaster configure --repo <path>`")
 
 func expandHome(p string) string {
 	if rest, ok := strings.CutPrefix(p, "~/"); ok {
@@ -242,7 +248,7 @@ func (c Config) repoFor(b Bead) string {
 	return c.Repo
 }
 
-// allRepos is every repository flatcircle follows, for passes that are not about
+// allRepos is every repository quartermaster follows, for passes that are not about
 // one bead (PR listing, worktree sweeps).
 func (c Config) allRepos() []string {
 	repos := []string{filepath.Clean(c.Repo)}

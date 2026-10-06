@@ -31,13 +31,15 @@ func configure(cfg Config, repoFlag string) ([]string, error) {
 	}
 	home, _ := os.UserHomeDir()
 	bin := filepath.Join(home, ".local", "bin")
-	msg, err = linkCLI(self, filepath.Join(bin, toolName))
-	if err != nil {
-		return out, err
+	for _, n := range []string{toolName, shortName} {
+		msg, err = linkCLI(self, filepath.Join(bin, n))
+		if err != nil {
+			return out, err
+		}
+		out = append(out, msg)
 	}
-	out = append(out, msg)
-	// Existing kelpie and shepherd links keep working as deprecated aliases; no
-	// new ones are made.
+	// Existing flatcircle, kelpie and shepherd links keep working as deprecated
+	// aliases; no new ones are made.
 	for _, n := range legacyNames {
 		if fi, err := os.Lstat(filepath.Join(bin, n)); err == nil && fi.Mode()&os.ModeSymlink != 0 {
 			msg, err = linkCLI(self, filepath.Join(bin, n))
@@ -51,7 +53,7 @@ func configure(cfg Config, repoFlag string) ([]string, error) {
 	if err := setView(socketRPC{herdrSocket()}); err != nil {
 		return append(out, "agent view not set (is herdr running?): "+err.Error()), nil
 	}
-	return append(out, `agent view set: label "flatcircle", sorted by thread state`), nil
+	return append(out, `agent view set: label "quartermaster", sorted by thread state`), nil
 }
 
 // ensureConfig writes a config with repo when there is none. The repo comes
@@ -76,7 +78,7 @@ func ensureConfig(path, repoFlag, workspaceCwd string, toplevel func(dir string)
 		}
 	}
 	if repo == "" {
-		return "", errors.New("no repo: run `flatcircle configure --repo <path to your repository>`")
+		return "", errors.New("no repo: run `quartermaster configure --repo <path to your repository>`")
 	}
 	if abs, err := filepath.Abs(repo); err == nil {
 		repo = abs
@@ -106,7 +108,7 @@ func linkCLI(self, target string) (string, error) {
 	case err != nil:
 		return "", err
 	case fi.Mode()&os.ModeSymlink == 0:
-		return fmt.Sprintf("%s is a real file, not a link; left it alone (flatcircle is at %s)", target, self), nil
+		return fmt.Sprintf("%s is a real file, not a link; left it alone (quartermaster is at %s)", target, self), nil
 	default:
 		if dest, err := filepath.EvalSymlinks(target); err == nil && dest == self {
 			return target + " already links to " + self, nil

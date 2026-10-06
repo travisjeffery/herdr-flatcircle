@@ -28,3 +28,16 @@ func TestMain(m *testing.M) {
 	os.RemoveAll(home)
 	os.Exit(code)
 }
+
+// A fresh install has no config yet; version and help must still work.
+func TestRunVersionWithoutConfig(t *testing.T) {
+	t.Setenv("QUARTERMASTER_CONFIG_DIR", t.TempDir())
+	for _, arg := range []string{"version", "--version", "-V", "help"} {
+		if err := run([]string{arg}); err != nil {
+			t.Errorf("run(%q) = %v, want nil without a config", arg, err)
+		}
+	}
+	if err := run([]string{"report"}); err == nil {
+		t.Error("run(report) without a config succeeded, want errNoRepo")
+	}
+}

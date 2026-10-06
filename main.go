@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 )
@@ -85,10 +84,17 @@ func run(args []string) error {
 		fmt.Print(usage)
 		return nil
 	}
-	if !slices.Contains([]string{"version", "--version", "-V", "help", "--help", "-h"}, args[0]) {
-		for _, msg := range migrateDirs() {
-			fmt.Fprintln(os.Stderr, "quartermaster:", msg)
-		}
+	// version and help need no config, so they work right after install.
+	switch args[0] {
+	case "version", "--version", "-V":
+		fmt.Println("quartermaster", version)
+		return nil
+	case "help", "--help", "-h":
+		fmt.Print(usage)
+		return nil
+	}
+	for _, msg := range migrateDirs() {
+		fmt.Fprintln(os.Stderr, "quartermaster:", msg)
 	}
 	cfg, err := loadConfig()
 	// configure is how a first-time install gets its config.
@@ -111,10 +117,6 @@ func run(args []string) error {
 		return err
 	}
 	switch cmd {
-	case "version", "--version", "-V":
-		fmt.Println("quartermaster", version)
-	case "help", "--help", "-h":
-		fmt.Print(usage)
 	case "coordinator":
 		msg, err := openCoordinator(cfg, h, *kind)
 		if err != nil {

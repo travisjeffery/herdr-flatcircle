@@ -69,35 +69,3 @@ func statusWarnings(cfg Config, st TickerState, now time.Time) []string {
 	}
 	return out
 }
-
-// heartbeatDue reports whether the ticker should log a heartbeat line.
-func heartbeatDue(cfg Config, st TickerState, now time.Time) bool {
-	every := cfg.heartbeatEvery()
-	return every > 0 && now.Sub(st.LastBeat) >= every
-}
-
-// heartbeatLine is the periodic log line that shows the ticker is alive when
-// nothing else happens: threads by group, inbox items, GitHub budget.
-func heartbeatLine(threads []Thread, inbox int, st TickerState, now time.Time) string {
-	counts := map[Group]int{}
-	for _, t := range threads {
-		counts[classify(t)]++
-	}
-	var groups []string
-	for g := GroupNeedsYou; g <= GroupNoAgent; g++ {
-		if n := counts[g]; n > 0 {
-			groups = append(groups, fmt.Sprintf("%d %s", n, g))
-		}
-	}
-	s := fmt.Sprintf("heartbeat: %d threads", len(threads))
-	if len(groups) > 0 {
-		s += " (" + strings.Join(groups, ", ") + ")"
-	}
-	s += fmt.Sprintf(" · %d inbox", inbox)
-	if st.GHLeftAt.IsZero() {
-		s += " · gh points unknown"
-	} else {
-		s += fmt.Sprintf(" · %d gh points left (%s)", st.GHLeft, ago(st.GHLeftAt, now))
-	}
-	return s
-}

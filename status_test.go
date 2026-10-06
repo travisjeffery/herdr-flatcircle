@@ -107,36 +107,3 @@ func TestStatusWarnings(t *testing.T) {
 		t.Errorf("at the floor: want no warning, got %q", ws)
 	}
 }
-
-func TestHeartbeat(t *testing.T) {
-	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
-	cfg := defaultConfig()
-	if heartbeatDue(cfg, TickerState{}, now) {
-		t.Error("heartbeat is off by default")
-	}
-	cfg.HeartbeatMinutes = 10
-	if !heartbeatDue(cfg, TickerState{}, now) {
-		t.Error("first heartbeat: want due")
-	}
-	if heartbeatDue(cfg, TickerState{LastBeat: now.Add(-9 * time.Minute)}, now) {
-		t.Error("9m after the last: want not due")
-	}
-	if !heartbeatDue(cfg, TickerState{LastBeat: now.Add(-10 * time.Minute)}, now) {
-		t.Error("10m after the last: want due")
-	}
-
-	threads := []Thread{
-		thread(bead(StatusNeedsMe), agent("idle", 1), nil),
-		thread(bead(StatusInProgress), agent("working", 1), nil),
-		thread(bead(StatusInProgress), agent("working", 1), nil),
-	}
-	st := TickerState{GHLeft: 4210, GHLeftAt: now.Add(-21 * time.Minute)}
-	want := "heartbeat: 3 threads (1 needs you, 2 working) · 2 inbox · 4210 gh points left (21m ago)"
-	if got := heartbeatLine(threads, 2, st, now); got != want {
-		t.Errorf("heartbeatLine = %q, want %q", got, want)
-	}
-	want = "heartbeat: 0 threads · 0 inbox · gh points unknown"
-	if got := heartbeatLine(nil, 0, TickerState{}, now); got != want {
-		t.Errorf("heartbeatLine(empty) = %q, want %q", got, want)
-	}
-}

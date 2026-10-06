@@ -38,7 +38,6 @@ type TickerState struct {
 	VerifyRepos  map[string]VerifyRepo `json:"verify_repos"` // by repo path
 	GHLeft       int                   `json:"gh_left"`      // GraphQL points left, as of GHLeftAt
 	GHLeftAt     time.Time             `json:"gh_left_at"`   // when a verify pass last read GHLeft
-	LastBeat     time.Time             `json:"last_heartbeat"`
 	// Intervals are the running ticker's, which a config edit since it
 	// started doesn't change: status measures lateness against these.
 	Intervals *Intervals `json:"intervals,omitempty"`
@@ -433,13 +432,7 @@ func (t Ticker) once(st *TickerState) error {
 	}
 	if coord, ok := agents[t.cfg.CoordinatorName]; ok {
 		inbox, _ := readInbox()
-		line := coordinatorLine(threads, len(inbox))
-		if t.cfg.SidebarTick {
-			// The pass's clock time, not an age: a pass stuck past a tick keeps
-			// its rows alive, and an age would read "0s" forever.
-			line += " · tick " + now.Format("15:04:05")
-		}
-		tokens := map[string]string{"sh_rank": coordinatorRank, "sh_state": line}
+		tokens := map[string]string{"sh_rank": coordinatorRank, "sh_state": coordinatorLine(threads, len(inbox))}
 		rows = append(rows, sidebarRow{Name: t.cfg.CoordinatorName, Pane: coord.PaneID, Tokens: tokens})
 	}
 	// Set before leftActive clears departed panes, so a refresh can't bring
@@ -455,13 +448,6 @@ func (t Ticker) once(st *TickerState) error {
 		t.verify(st, now)
 	}
 	t.nudgeCoordinator(st, agents, now)
-	// A fresh clock: verify or a nudge can take a while, and the pass-start
-	// time would put a heartbeat off for a whole extra pass.
-	if beat := time.Now(); heartbeatDue(t.cfg, *st, beat) {
-		inbox, _ := readInbox()
-		t.log.Print(heartbeatLine(threads, len(inbox), *st, beat))
-		st.LastBeat = beat
-	}
 	return nil
 }
 

@@ -54,12 +54,6 @@ type Config struct {
 	// HerdrSocket is the herdr server the coordinator runs on. The ticker
 	// always talks to it, whichever server's plugin startup launched it.
 	HerdrSocket string `toml:"herdr_socket"`
-	// HeartbeatMinutes is how often the ticker writes a status line to its
-	// log, so a quiet log still shows it is alive; 0 turns it off.
-	HeartbeatMinutes int `toml:"heartbeat_minutes"`
-	// SidebarTick adds the time of the ticker's last pass to the
-	// coordinator's sidebar row.
-	SidebarTick bool `toml:"sidebar_tick"`
 
 	// Repos are named repositories a bead selects with a repo:<name> label;
 	// Repo is the default.
@@ -283,9 +277,6 @@ func (c Config) ghEvery() time.Duration {
 }
 func (c Config) verifyEvery() time.Duration {
 	return time.Duration(max(c.VerifyMinutes, 0)) * time.Minute
-}
-func (c Config) heartbeatEvery() time.Duration {
-	return time.Duration(max(c.HeartbeatMinutes, 0)) * time.Minute
 }
 func (c Config) staleAge() time.Duration { return time.Duration(max(c.StaleDays, 0)) * 24 * time.Hour }
 func (c Config) idle() time.Duration     { return time.Duration(c.IdleSeconds) * time.Second }

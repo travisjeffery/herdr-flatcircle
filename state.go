@@ -292,13 +292,13 @@ func transition(t Thread, prev Snapshot, first bool, now time.Time) Outcome {
 		if len(t.Checks.Failing) > 0 && !slices.Equal(t.Checks.Failing, prev.Failing) {
 			ev(EventFailing, "PR #%d checks failing: %s", t.PR.Number, strings.Join(t.Checks.Failing, ", "))
 			o.Prompts = append(o.Prompts, fmt.Sprintf(
-				"[flatcircle: automated, not the user] PR #%d has failing checks: %s. Investigate with `gh pr checks %d`, fix them on this branch, and push.",
+				"[quartermaster: automated, not the user] PR #%d has failing checks: %s. Investigate with `gh pr checks %d`, fix them on this branch, and push.",
 				t.PR.Number, strings.Join(t.Checks.Failing, ", "), t.PR.Number))
 		}
 		review := func(what string) {
 			ev(EventReview, "PR #%d has %s", t.PR.Number, what)
 			o.Prompts = append(o.Prompts, fmt.Sprintf(
-				"[flatcircle: automated, not the user] PR #%d has %s. Read it with `gh pr view %d --comments` and the review threads; fix what is valid, reply to what is not, and push.",
+				"[quartermaster: automated, not the user] PR #%d has %s. Read it with `gh pr view %d --comments` and the review threads; fix what is valid, reply to what is not, and push.",
 				t.PR.Number, what, t.PR.Number))
 		}
 		// Snapshots from before bots were told apart counted them as human
@@ -330,7 +330,7 @@ func transition(t Thread, prev Snapshot, first bool, now time.Time) Outcome {
 		if prev.AutoMerge != "" && prev.AutoMerge == t.PR.URL && t.PR.AutoMerge == nil && !t.PR.IsDraft && t.Bead.Status != StatusNeedsMe {
 			ev(EventAutoMergeOff, "PR #%d auto-merge was turned off", t.PR.Number)
 			o.Prompts = append(o.Prompts, fmt.Sprintf(
-				"[flatcircle: automated, not the user] PR #%d no longer has auto-merge on; GitHub turns it off when the base branch changes or someone without write access pushes. Unless you turned it off on purpose, turn it back on with `gh pr merge %s --auto --squash`.",
+				"[quartermaster: automated, not the user] PR #%d no longer has auto-merge on; GitHub turns it off when the base branch changes or someone without write access pushes. Unless you turned it off on purpose, turn it back on with `gh pr merge %s --auto --squash`.",
 				t.PR.Number, t.PR.URL))
 		}
 	}
@@ -345,13 +345,13 @@ func transition(t Thread, prev Snapshot, first bool, now time.Time) Outcome {
 		switch {
 		case t.Bead.HasLabel(LabelRollingOut):
 			o.Prompts = append(o.Prompts, fmt.Sprintf(
-				"[flatcircle: automated, not the user] %s merged. Continue the rollout with its next step. When the rollout is finished and verified, remove the label with `bd label remove %s %s`, then close the bead with `bd close %s --reason \"<what shipped and how it was verified>\"`.",
+				"[quartermaster: automated, not the user] %s merged. Continue the rollout with its next step. When the rollout is finished and verified, remove the label with `bd label remove %s %s`, then close the bead with `bd close %s --reason \"<what shipped and how it was verified>\"`.",
 				what, id, LabelRollingOut, id))
 		case t.PR != nil && t.PR.State == "OPEN":
 			// Another of the bead's PRs is still open; closing waits for it.
 		case t.Bead.Status != StatusClosed:
 			o.Prompts = append(o.Prompts, fmt.Sprintf(
-				"[flatcircle: automated, not the user] %s merged. Verify what needs verifying after merge, then close the bead with `bd close %s --reason \"<what shipped and how it was verified>\"` and stop.",
+				"[quartermaster: automated, not the user] %s merged. Verify what needs verifying after merge, then close the bead with `bd close %s --reason \"<what shipped and how it was verified>\"` and stop.",
 				what, id))
 		}
 	}
@@ -360,12 +360,12 @@ func transition(t Thread, prev Snapshot, first bool, now time.Time) Outcome {
 		case r.Conclusion == "success":
 			ev(EventRunSucceeded, "%s run %d succeeded", r.Workflow, r.ID)
 			o.Prompts = append(o.Prompts, fmt.Sprintf(
-				"[flatcircle: automated, not the user] %s run %s succeeded. Continue with the next step of the rollout.", r.Workflow, r.URL))
+				"[quartermaster: automated, not the user] %s run %s succeeded. Continue with the next step of the rollout.", r.Workflow, r.URL))
 		case runFailed(r):
 			o.Notify = true
 			ev(EventRunFailed, "%s run %d ended %s", r.Workflow, r.ID, r.Conclusion)
 			o.Prompts = append(o.Prompts, fmt.Sprintf(
-				"[flatcircle: automated, not the user] %s run %s ended %s. Investigate with `gh run view %d -R %s --log-failed`, fix what is wrong, and carry on with the rollout.",
+				"[quartermaster: automated, not the user] %s run %s ended %s. Investigate with `gh run view %d -R %s --log-failed`, fix what is wrong, and carry on with the rollout.",
 				r.Workflow, r.URL, r.Conclusion, r.ID, r.Repo))
 		}
 	}

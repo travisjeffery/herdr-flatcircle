@@ -11,11 +11,11 @@ type rename struct {
 
 // nameFixes finds agents working an active bead under the wrong name: the only
 // agent inside the bead's linked worktree, while no agent carries the bead's
-// name. Flatcircle ties an agent to its bead by name alone, so a misnamed worker
-// drops out of the sidebar, the prompts and the inbox. An agent already named
-// after another active bead, or the coordinator, is never renamed. A
-// coordinator still named kelpie or shepherd, from before a rename, becomes
-// flatcircle's.
+// name. Quartermaster ties an agent to its bead by name alone, so a misnamed
+// worker drops out of the sidebar, the prompts and the inbox. An agent already
+// named after another active bead, or the coordinator, is never renamed. A
+// coordinator still named flatcircle, kelpie or shepherd, from before a rename,
+// becomes quartermaster's.
 func nameFixes(cfg Config, active []Bead, agents []Agent, prs map[string]PR, wts map[string][]Worktree) []rename {
 	named := map[string]bool{}
 	for _, a := range agents {
@@ -57,8 +57,8 @@ func nameFixes(cfg Config, active []Bead, agents []Agent, prs map[string]PR, wts
 	return out
 }
 
-// legacyCoordinator is the coordinator agent still under an old name (kelpie
-// before shepherd), from before a rename, while no agent carries the
+// legacyCoordinator is the coordinator agent still under an old name (newest
+// first: flatcircle, kelpie, shepherd), from before a rename, while no agent carries the
 // coordinator's name. A coordinator_name set to an old name is not legacy.
 func legacyCoordinator(cfg Config, agents []Agent) (Agent, bool) {
 	if isLegacyName(cfg.CoordinatorName) {

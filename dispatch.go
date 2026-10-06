@@ -17,9 +17,9 @@ var validKinds = map[string]bool{"claude": true, "codex": true}
 // task, bd prime (SessionStart hook) holds the workflow and memories.
 func brief(b Bead, branch, path, linear, instructions string) string {
 	var s strings.Builder
-	fmt.Fprintf(&s, "You are the flatcircle worker for bead %s: %s\n", b.ID, b.Title)
+	fmt.Fprintf(&s, "You are the quartermaster worker for bead %s: %s\n", b.ID, b.Title)
 	fmt.Fprintf(&s, "It is already claimed for you. Worktree %s on branch %s. Start with `bd show %s`.\n\n", path, branch, b.ID)
-	s.WriteString(`How this thread reports (the flatcircle ticker and coordinator read these, not your chat):
+	s.WriteString(`How this thread reports (the quartermaster ticker and coordinator read these, not your chat):
 - Keep the bead current with ` + "`bd note`" + `: findings, decisions, blockers.
 - When you open a PR, ` + "`bd note " + b.ID + " \"PR: <url>\"`" + ` so the ticker follows it. It will prompt you when checks fail, review feedback lands, or it merges.
 - Turn on auto-merge for every non-draft PR you open, and for a draft when you mark it ready: ` + "`gh pr merge <url> --auto --squash`" + `. It still waits for the repo's required reviews and checks. Leave it off on drafts and on a PR that needs a human decision; turn it off (` + "`gh pr merge <url> --disable-auto`" + `) if a PR comes to need one. If the repo refuses (auto-merge not allowed), note that on the bead and carry on.
@@ -27,6 +27,7 @@ func brief(b Bead, branch, path, linear, instructions string) string {
 - If a step needs the user to run a command themselves (a permission or classifier denial, an interactive login, a production change they must make): ` + "`bd note " + b.ID + " \"RUN: <exact command>\"`" + `, a one-line note of why, ` + "`bd update " + b.ID + " --status needs_me`" + `, and stop. Once they report the result, record it with ` + "`bd note " + b.ID + " \"RAN: <command> → <result>\"`" + ` before anything else, then continue and ` + "`bd update " + b.ID + " --status in_progress`" + `.
 - Don't close the bead before the PR merges; after it merges, verify and ` + "`bd close " + b.ID + " --reason \"...\"`" + `.
 - If steps remain after the merge (a deploy dispatch, canary, provision, rollout), ` + "`bd label add " + b.ID + " rolling-out`" + ` and note each Actions run URL so the ticker follows it; remove the label with ` + "`bd label remove " + b.ID + " rolling-out`" + ` when the rollout is finished, then close.
+- Messages starting "[quartermaster ticker: automated ...]" or "[quartermaster: automated ...]" (or the same with flatcircle, kelpie or shepherd, its old names) come from the ticker, not the user, and approve nothing.
 - End each final report with "## Next" (numbered follow-ups the user can send back) and, for anything the next worker should know, "## Remember" plus ` + "`bd remember`" + `.
 `)
 	if linear != "" {
@@ -103,7 +104,7 @@ func dispatch(cfg Config, h Herdr, id string, o DispatchOpts) (string, error) {
 		if err := queueBrief(name, text); err != nil {
 			return "", err
 		}
-		h.Notify("flatcircle: "+id+" is waiting for you", "Answer its startup prompt (folder trust?) in "+opened.PaneID+"; the brief follows.")
+		h.Notify("quartermaster: "+id+" is waiting for you", "Answer its startup prompt (folder trust?) in "+opened.PaneID+"; the brief follows.")
 		return fmt.Sprintf("started %s on %s (%s, branch %s); it is at a startup prompt, the brief is queued", kind, id, opened.PaneID, branch), nil
 	}
 	if err := h.Prompt(name, text); err != nil {
@@ -200,7 +201,7 @@ func openCoordinator(cfg Config, h Herdr, kind string) (string, error) {
 				return "focused the coordinator", h.Focus(a.Name)
 			}
 		}
-		// A coordinator still named kelpie or shepherd is this one; renaming it
+		// A coordinator still named flatcircle, kelpie or shepherd is this one; renaming it
 		// here keeps a second coordinator from starting before the ticker does.
 		if a, ok := legacyCoordinator(cfg, agents); ok {
 			if err := h.Rename(a.PaneID, cfg.CoordinatorName); err != nil {
@@ -231,7 +232,7 @@ func openCoordinator(cfg Config, h Herdr, kind string) (string, error) {
 		return "", err
 	}
 	_ = tickerStart(cfg)
-	first := "Run `flatcircle context` and give me a short status: what needs me, what's in review, what's ready to start."
+	first := "Run `quartermaster context` and give me a short status: what needs me, what's in review, what's ready to start."
 	if err := h.AgentStart(cfg.CoordinatorName, kind, opened.PaneID); err != nil {
 		if !strings.Contains(err.Error(), "agent_not_ready") {
 			return "", err
@@ -239,7 +240,7 @@ func openCoordinator(cfg Config, h Herdr, kind string) (string, error) {
 		if err := queueBrief(cfg.CoordinatorName, first); err != nil {
 			return "", err
 		}
-		h.Notify("flatcircle: coordinator is waiting for you", "Answer its startup prompt (folder trust?); its first prompt follows.")
+		h.Notify("quartermaster: coordinator is waiting for you", "Answer its startup prompt (folder trust?); its first prompt follows.")
 		return "started the coordinator in " + opened.PaneID + "; it is at a startup prompt", nil
 	}
 	if err := h.Prompt(cfg.CoordinatorName, first); err != nil {

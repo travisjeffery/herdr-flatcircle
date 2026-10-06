@@ -82,7 +82,7 @@ func TestPROwnerIsScopedToTheBeadsRepo(t *testing.T) {
 }
 
 func TestContextTagsNonDefaultRepoAndWarnsOnUnknown(t *testing.T) {
-	t.Setenv("FLATCIRCLE_STATE_DIR", t.TempDir())
+	t.Setenv("QUARTERMASTER_STATE_DIR", t.TempDir())
 	threads := []Thread{
 		{Bead: labelled("b-1")},
 		{Bead: labelled("b-2", "repo:infra")},
@@ -106,7 +106,7 @@ func TestContextTagsNonDefaultRepoAndWarnsOnUnknown(t *testing.T) {
 
 func TestLoadConfigExpandsRepos(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("FLATCIRCLE_CONFIG_DIR", dir)
+	t.Setenv("QUARTERMASTER_CONFIG_DIR", dir)
 	t.Setenv("BEADS_DIR", dir)
 	t.Setenv("HOME", "/home/me")
 	toml := "repo = \"~/src/app\"\nrepos = { infra = \"~/src/infra\", model = \"/opt/model\" }\n"

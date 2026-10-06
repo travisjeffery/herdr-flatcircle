@@ -97,7 +97,7 @@ func gitRun(dir string, args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
-// beadForBranch finds the bead a flatcircle branch was cut for: one whose own
+// beadForBranch finds the bead a quartermaster branch was cut for: one whose own
 // name the branch is before one it merely starts with, then the most specific.
 // A parent titled "2 things" owns tj/backend-x-2-things although its child
 // backend-x.2 would also match it.
@@ -322,7 +322,7 @@ func yesNo(b bool) string {
 	return "no"
 }
 
-// activeBeadFor names the active bead a branch belongs to: by flatcircle's
+// activeBeadFor names the active bead a branch belongs to: by quartermaster's
 // branch naming or by the PR head the ticker recorded for it.
 func activeBeadFor(prefix, branch string, active []Bead, heads map[string]string) string {
 	if b, ok := beadForBranch(prefix, branch, active); ok {

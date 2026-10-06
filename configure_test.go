@@ -9,7 +9,7 @@ import (
 
 func TestEnsureConfig(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "flatcircle", "config.toml")
+	path := filepath.Join(dir, "quartermaster", "config.toml")
 	top := func(d string) string {
 		if d == "/ws/app/sub" {
 			return "/ws/app"
@@ -43,10 +43,10 @@ func TestEnsureConfig(t *testing.T) {
 
 func TestLinkCLI(t *testing.T) {
 	dir := t.TempDir()
-	self := filepath.Join(dir, "plugin", "bin", "flatcircle")
+	self := filepath.Join(dir, "plugin", "bin", "quartermaster")
 	os.MkdirAll(filepath.Dir(self), 0o755)
 	os.WriteFile(self, []byte("x"), 0o755)
-	target := filepath.Join(dir, "bin", "flatcircle")
+	target := filepath.Join(dir, "bin", "quartermaster")
 
 	if msg, err := linkCLI(self, target); err != nil || !strings.HasPrefix(msg, "linked") {
 		t.Fatalf("%q %v", msg, err)
@@ -55,7 +55,7 @@ func TestLinkCLI(t *testing.T) {
 		t.Fatalf("repeat should be a no-op: %q", msg)
 	}
 
-	old := filepath.Join(dir, "old", "flatcircle")
+	old := filepath.Join(dir, "old", "quartermaster")
 	os.MkdirAll(filepath.Dir(old), 0o755)
 	os.WriteFile(old, []byte("y"), 0o755)
 	os.Remove(target)

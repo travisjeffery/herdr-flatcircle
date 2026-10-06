@@ -180,7 +180,7 @@ func branchFor(prefix string, b Bead) string {
 // onBeadBranch reports whether head is a branch cut for b. Branches are
 // <prefix><id>-<slug> and a sub-bead's id gains a digit segment (backend-x.7
 // is tj/backend-x-7-…), so after b's own stem a digit segment belongs to a
-// child and only counts when head is exactly the branch flatcircle names for b.
+// child and only counts when head is exactly the branch quartermaster names for b.
 func onBeadBranch(prefix, head string, b Bead) bool {
 	want := prefix + agentName(b.ID)
 	if head == want || head == branchFor(prefix, b) {

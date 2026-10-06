@@ -1,4 +1,4 @@
-# flatcircle
+# quartermaster
 
 Run many coding agents in parallel from one conversation.
 
@@ -22,7 +22,7 @@ state shows in Herdr's sidebar.
 - **Worktrees and workers are handled for you.** One bead gets one branch, one
   worktree and one agent named after the bead. Starting a thread is one key;
   cleaning up after a merge is one command.
-- **Beads is the only state.** No task file or database of flatcircle's own:
+- **Beads is the only state.** No task file or database of quartermaster's own:
   statuses, notes and memories live in `bd`, which many agents can update at
   once. That's what lets you run many threads without them stepping on each
   other, and what lets any session, including the coordinator after a restart,
@@ -36,31 +36,31 @@ state shows in Herdr's sidebar.
 |---|---|---|
 | **Beads** (`bd`) | The issue tracker in your repo | All task state: status, notes, questions, lessons. The only record. |
 | **Herdr** | The terminal the agents run in | Panes, agent names and states, worktrees, the sidebar, notifications |
-| **Coordinator** | One agent named `flatcircle`, in `~/.local/state/flatcircle/coordinator` | Talking to you, planning, creating beads, dispatching. Never does the work. |
+| **Coordinator** | One agent named `quartermaster`, in `~/.local/state/quartermaster/coordinator` | Talking to you, planning, creating beads, dispatching. Never does the work. |
 | **Workers** | One agent per bead, named after the bead, in the bead's worktree | Doing the work and keeping their bead current |
-| **Ticker** | A background loop (`flatcircle ticker`), started with the plugin | Watching threads, following PRs and runs, prompting workers, the inbox, the sidebar |
+| **Ticker** | A background loop (`quartermaster ticker`), started with the plugin | Watching threads, following PRs and runs, prompting workers, the inbox, the sidebar |
 
 The coordinator and the ticker never talk to each other directly. The ticker
-writes events to an **inbox** (files in `~/.local/state/flatcircle/inbox/`) and
+writes events to an **inbox** (files in `~/.local/state/quartermaster/inbox/`) and
 nudges the coordinator; the coordinator reads the inbox through
-`flatcircle context`. Everything a worker wants to say goes into its bead.
+`quartermaster context`. Everything a worker wants to say goes into its bead.
 
 ### The loop
 
 ```
-  you ──── talk ────▶ coordinator ── flatcircle dispatch ──▶ worker (own worktree)
+  you ──── talk ────▶ coordinator ── quartermaster dispatch ──▶ worker (own worktree)
    ▲                    ▲     │                                  │  ▲
-   │                    │     └── flatcircle context◀┐           │  │ prompts, once idle 60s
+   │                    │     └── quartermaster context◀┐           │  │ prompts, once idle 60s
    │ notifications      │ nudge                      │ inbox     │  │ (checks, reviews, merge, runs)
    │ + sidebar          │                            │           ▼  │
    └──────────────────── ticker ─────────────────────┴──── reads bd, herdr, gh
                          every 15s (PRs and runs every 60s)
 ```
 
-1. **You ask the coordinator for something.** It runs `flatcircle context`,
+1. **You ask the coordinator for something.** It runs `quartermaster context`,
    creates beads for the work (`bd create`, with parents and dependencies), and
    proposes threads. It waits for your go-ahead.
-2. **The coordinator dispatches.** `flatcircle dispatch <bead>` claims the bead,
+2. **The coordinator dispatches.** `quartermaster dispatch <bead>` claims the bead,
    creates a worktree on `<branch_prefix><bead>-<slug>`, starts Claude or Codex
    named after the bead, and sends the **brief**: the bead id and title, the
    worktree and branch, the Linear key if there is one, how to report, and
@@ -100,14 +100,14 @@ nudges the coordinator; the coordinator reads the inbox through
      or a human review notifies you.
    - **The coordinator:** when there are new events and the coordinator has
      been idle for `idle_seconds`, the ticker nudges it to run
-     `flatcircle context`.
+     `quartermaster context`.
 6. **The coordinator catches up.** It reads the inbox and threads, relays
    questions and `RUN:` commands to you, passes your answers to the worker
    (`herdr agent prompt`), and marks the items handled with
-   `flatcircle inbox done`.
+   `quartermaster inbox done`.
 7. **The thread finishes.** After the merge the worker verifies and closes its
    bead with a reason. The ticker sees it leave the active set and writes a
-   `closed` event, and the coordinator runs `flatcircle resolve` to remove the
+   `closed` event, and the coordinator runs `quartermaster resolve` to remove the
    worktree.
 
 ### Finishing a thread
@@ -116,7 +116,7 @@ Usually there's nothing to do. When a worker's PR merges, the ticker tells it
 to verify and close its bead (`bd close <id> --reason "<what shipped and how
 it was verified>"`). A `rolling-out` bead is finished first, then closed. The
 ticker sees the bead close and writes a `closed` event, and the coordinator
-runs `flatcircle resolve <bead>`: that removes the bead's worktree and its
+runs `quartermaster resolve <bead>`: that removes the bead's worktree and its
 workspace, closing the worker's pane, and deletes the local branch if the PR
 merged. With `auto_resolve = true` the ticker resolves on its own once the PR
 has merged, the bead is closed and the agent is idle.
@@ -125,11 +125,11 @@ By hand:
 
 | Situation | Do this |
 |---|---|
-| Done without a PR (an investigation, an ops task) | `bd close <id> --reason "…"`, then `flatcircle resolve <id>` |
-| Dropping the work | `bd close <id> --reason "dropped: …"`, or `bd update <id> --status deferred` to park it; then `flatcircle resolve <id> --force` if nothing in the worktree is worth keeping |
+| Done without a PR (an investigation, an ops task) | `bd close <id> --reason "…"`, then `quartermaster resolve <id>` |
+| Dropping the work | `bd close <id> --reason "dropped: …"`, or `bd update <id> --status deferred` to park it; then `quartermaster resolve <id> --force` if nothing in the worktree is worth keeping |
 | Done, but you want the worktree a while longer | Close the bead and resolve it later |
-| Finished worktrees have piled up | `flatcircle sweep`, then `flatcircle sweep --yes` to remove the safe ones |
-| Claims nobody is going to finish | `flatcircle stale`, then `flatcircle stale --release` to reopen them |
+| Finished worktrees have piled up | `quartermaster sweep`, then `quartermaster sweep --yes` to remove the safe ones |
+| Claims nobody is going to finish | `quartermaster stale`, then `quartermaster stale --release` to reopen them |
 
 `resolve` refuses while the bead is still open or its agent is working, unless
 you pass `--force`, and it only ever removes a linked worktree on that bead's
@@ -140,9 +140,9 @@ When you close something, also:
 
 - save anything the next worker should know with `bd remember "…"`; every new
   session loads it at start-up;
-- mark its inbox items handled (`flatcircle inbox done <bead>`) if you dealt
+- mark its inbox items handled (`quartermaster inbox done <bead>`) if you dealt
   with it without the coordinator;
-- move its Linear issue to Done (`flatcircle context` lists the moves due).
+- move its Linear issue to Done (`quartermaster context` lists the moves due).
 
 ### Messages
 
@@ -150,10 +150,10 @@ Every automated message says it isn't from you, and none approves anything.
 
 | From → to | When | Starts with |
 |---|---|---|
-| dispatch → worker | Once, at start | `You are the flatcircle worker for bead …` |
-| ticker → worker | Checks fail, review feedback, ready to merge, auto-merge turned off, merge, run finished | `[flatcircle: automated, not the user] PR #N …` |
-| resume → worker | After `flatcircle resume` | `[flatcircle] You were resumed after your agent exited.` |
-| ticker → coordinator | New inbox items and the coordinator is idle | `[flatcircle ticker: automated, not the user, approves nothing] N new inbox item(s).` |
+| dispatch → worker | Once, at start | `You are the quartermaster worker for bead …` |
+| ticker → worker | Checks fail, review feedback, ready to merge, auto-merge turned off, merge, run finished | `[quartermaster: automated, not the user] PR #N …` |
+| resume → worker | After `quartermaster resume` | `[quartermaster] You were resumed after your agent exited.` |
+| ticker → coordinator | New inbox items and the coordinator is idle | `[quartermaster ticker: automated, not the user, approves nothing] N new inbox item(s).` |
 | worker → everyone | Any time | A note on its bead (`bd note`), or a status change |
 | coordinator → worker | Relaying your answer | Whatever it writes with `herdr agent prompt` |
 
@@ -169,7 +169,7 @@ once per head commit; otherwise the board shows
 
 ### Features in detail
 
-- **Names.** Flatcircle ties a worker to its bead by name: the bead id with
+- **Names.** Quartermaster ties a worker to its bead by name: the bead id with
   dots as dashes (`backend-ab12.3` → `backend-ab12-3`). Dispatch and resume
   set it. If something else renames a worker, the ticker renames it back once
   a minute, when it's the only agent in an active bead's worktree.
@@ -198,9 +198,9 @@ once per head commit; otherwise the board shows
   merge prompt says to carry on rather than close.
 - **Bot reviews** (Codex, CodeRabbit and other GitHub Apps) are told apart from
   human ones. Both go to the worker; only a human review notifies you.
-- **Resume.** Herdr restarts don't relaunch agents. `flatcircle resume` restarts
+- **Resume.** Herdr restarts don't relaunch agents. `quartermaster resume` restarts
   each claimed bead's agent in its worktree with `claude --continue` or
-  `codex resume --last`, as whichever agent claimed it. `flatcircle context`
+  `codex resume --last`, as whichever agent claimed it. `quartermaster context`
   lists resumable threads, stale claims (in progress, no agent, worktree or
   PR, untouched 7 days) and other claims separately.
 - **Several repos.** Beads labelled `repo:<name>` work in that repo from
@@ -208,7 +208,7 @@ once per head commit; otherwise the board shows
   configured.
 - **Linear.** The bead's issue key comes from its title, or from a `Linear:`
   note (any note, if `linear_prefixes` is set). It goes in the brief and at
-  the end of the sidebar row. `flatcircle context` lists where each issue should
+  the end of the sidebar row. `quartermaster context` lists where each issue should
   be (In Review while its PR is open, Done once merged) and flags PR titles
   missing the key.
 - **Choosing the agent.** `worker_agent = "auto"` picks Codex only when both
@@ -247,34 +247,34 @@ once per head commit; otherwise the board shows
   calls count against `verify_max`; beads over it wait for the next pass. A
   pass is skipped while fewer than `gh_min_remaining` GraphQL points are left
   this hour, since the limit is shared with every agent. A verdict is written
-  to the inbox once and again only when it changes. `flatcircle verify` shows what
-  a pass would do; `flatcircle verify <bead>` checks one bead in full.
-- **Reporting.** `flatcircle report` prints beads closed in the window with
+  to the inbox once and again only when it changes. `quartermaster verify` shows what
+  a pass would do; `quartermaster verify <bead>` checks one bead in full.
+- **Reporting.** `quartermaster report` prints beads closed in the window with
   their close reasons and PRs, your PRs merged without a bead, open PRs in
   flight, and `needs_me` beads with their latest note.
-- **The sidebar sort** is a Herdr agent view owned by `plugin:flatcircle`: the
+- **The sidebar sort** is a Herdr agent view owned by `plugin:quartermaster`: the
   coordinator first, with a row summarising what it has to deal with
   (`coordinator · 2 need you · 1 review · 3 inbox`), then threads by state
   (needs you first), then agents that aren't on a bead. Herdr drops the view
   when the plugin is unlinked, uninstalled or disabled.
 
-State lives in `~/.local/state/flatcircle/`: `state.json` (the ticker's memory
+State lives in `~/.local/state/quartermaster/`: `state.json` (the ticker's memory
 of each thread), `inbox/` and `inbox/done/` (events), `outbox/` (briefs
 waiting for an agent), `coordinator/` (its folder) and `ticker.log`.
 
-## A day with flatcircle
+## A day with quartermaster
 
 What this looks like on a real working day for someone who owns a service and
 its infrastructure. Bead ids, PR numbers and names are made up.
 
 **9:00: catching up.** You open the coordinator and ask where things stand. It
-runs `flatcircle context`, which starts like this (trimmed):
+runs `quartermaster context`, which starts like this (trimmed):
 
 ```
 1 needs you · 1 checks failing · 2 idle
 
-## Inbox (unhandled; `flatcircle inbox done [bead...]` when dealt with)
-- 02:14 app-8zk4 [closed] app-8zk4 closed after PR #402 merged; run `flatcircle resolve app-8zk4` to remove its worktree
+## Inbox (unhandled; `quartermaster inbox done [bead...]` when dealt with)
+- 02:14 app-8zk4 [closed] app-8zk4 closed after PR #402 merged; run `quartermaster resolve app-8zk4` to remove its worktree
 - 04:40 app-c71m [checks_failing] PR #405 checks failing: integration-tests
 
 ## Threads (bead · state · agent)
@@ -289,7 +289,7 @@ merged, and its worker verified the change and closed its bead. You answer the
 one question: "One region first, then the rest after an hour of clean
 metrics." The coordinator passes that to the worker, which resets its bead to
 `in_progress` and carries on. Then the coordinator runs
-`flatcircle resolve app-8zk4`, which removes the merged thread's worktree and
+`quartermaster resolve app-8zk4`, which removes the merged thread's worktree and
 branch.
 
 **9:20: new work from yesterday's incident.** You paste your incident notes: a
@@ -329,7 +329,7 @@ were doing.
 
 **13:00: one-offs.** A colleague posts a bead id in chat: an intermittent test
 failure that needs a look. You copy it and press your focus-clipboard key
-(`flatcircle.focus-clipboard`), and a worker starts on it without going through
+(`quartermaster.focus-clipboard`), and a worker starts on it without going through
 the coordinator. Anything with a bead can
 be started from the clipboard or from the board (`prefix+j`, then `c` for
 Claude or `x` for Codex).
@@ -348,7 +348,7 @@ so every future worker that runs `bd prime` at start-up sees it.
 
 Nothing about the day lived in your head or a scratch file: every thread's
 state, question, PR and lesson is in beads, and the next morning starts with
-the same `flatcircle context`.
+the same `quartermaster context`.
 
 The board (`prefix+j`) lists threads by state plus the beads you've marked
 `next` and other ready beads: `↵` focus or start, `c`/`x` start with Claude or
@@ -374,11 +374,11 @@ or starts as in the list, and `esc`, `q` or `space` go back.
 
 Once it's installed (see below), the first ten minutes:
 
-1. **Install and configure it** (below). `configure` points flatcircle at your
+1. **Install and configure it** (below). `configure` points quartermaster at your
    repo. Beads should already be set up there (`bd init`) with the `needs_me`
    status added.
 2. **Open the coordinator** with `prefix+shift+j`. It starts in a folder of its
-   own, reads `flatcircle context` and gives you a status. The first time, Claude
+   own, reads `quartermaster context` and gives you a status. The first time, Claude
    asks whether to trust that folder; say yes.
 3. **Give it something small.** "Add a `--json` flag to the `export` command."
    It creates a bead, proposes one thread and waits.
@@ -399,49 +399,52 @@ to build from source.
 ## Install
 
 ```sh
-herdr plugin install travisjeffery/herdr-flatcircle --ref v0.4.0
+herdr plugin install travisjeffery/herdr-quartermaster --ref v0.5.0
 ```
 
 Herdr downloads the prebuilt binary for your machine and checks it against the
 release's checksums. Then, from a workspace in the repository you want
-flatcircle to work in:
+quartermaster to work in:
 
 ```sh
-herdr plugin action invoke configure --plugin flatcircle
+herdr plugin action invoke configure --plugin quartermaster
 ```
 
-`configure` writes `~/.config/flatcircle/config.toml` with that repository (or
-pass `--repo <path>` when running `flatcircle configure` directly), links
-`~/.local/bin/flatcircle`, and sets up the sidebar sort. It's safe to run again
+`configure` writes `~/.config/quartermaster/config.toml` with that repository (or
+pass `--repo <path>` when running `quartermaster configure` directly), links
+`~/.local/bin/quartermaster` (and `~/.local/bin/qm`), and sets up the sidebar sort. It's safe to run again
 and never rewrites an existing config.
 
-To build from source instead: clone the repo, run `go build -o bin/flatcircle .`,
-then `herdr plugin link "$PWD"` and `bin/flatcircle configure --repo <path>`.
+To build from source instead: clone the repo, run `go build -o bin/quartermaster .`,
+then `herdr plugin link "$PWD"` and `bin/quartermaster configure --repo <path>`.
 
-The name `flatcircle` is only this tool's binary and Herdr plugin id; it is not
+The name `quartermaster` is only this tool's binary and Herdr plugin id; it is not
 published to any package registry.
 
-### Upgrading from kelpie or shepherd
+### Upgrading from flatcircle, kelpie or shepherd
 
-flatcircle was called kelpie, and shepherd before that. The first flatcircle
-command moves `~/.config/kelpie` to `~/.config/flatcircle` and
-`~/.local/state/kelpie` to `~/.local/state/flatcircle` (or the `shepherd` dirs,
-for an install that never became kelpie), leaving a link at each old path, so
-the inbox, state and coordinator folder carry over and an older running ticker
-keeps working. A `shepherd` link left by the kelpie upgrade still resolves
-through the `kelpie` one. If the new directory already exists it is used and
-the old one is left alone. `KELPIE_CONFIG_DIR`, `KELPIE_STATE_DIR` and their
-`SHEPHERD_` forms are still read when the `FLATCIRCLE_` ones are unset.
+quartermaster was called flatcircle, kelpie before that, and shepherd before
+that. The first quartermaster command moves `~/.config/flatcircle` to
+`~/.config/quartermaster` and `~/.local/state/flatcircle` to
+`~/.local/state/quartermaster` (or the `kelpie` or `shepherd` dirs, for an
+install that never took a later name), leaving a link at each old path, so
+the config, inbox, ticker log, worktree bookkeeping and coordinator folder
+carry over and an older running ticker or coordinator keeps working. Links
+left by earlier upgrades still resolve through the `flatcircle` one. If the
+new directory already exists it is used and the old one is left alone.
+`FLATCIRCLE_CONFIG_DIR`, `FLATCIRCLE_STATE_DIR` and their `KELPIE_` and
+`SHEPHERD_` forms are still read when the `QUARTERMASTER_` ones are unset.
 
-`kelpie` and `shepherd` still work as deprecated aliases: `bin/kelpie` and
-`bin/shepherd` link to `bin/flatcircle`, `configure` repoints existing
-`~/.local/bin/kelpie` and `~/.local/bin/shepherd` links, and running either
-prints a one-line notice. A coordinator agent still named `kelpie` or
-`shepherd` is renamed `flatcircle` by the ticker, and its workspace, if still
-labelled with an old name, is relabelled `flatcircle`. An older ticker is
-restarted as flatcircle by `flatcircle ticker start`. Herdr plugin ids changed
-too, so unlink the old plugin, link or install this one, and rename `kelpie.*`
-(or `shepherd.*`) keys in `~/.config/herdr/config.toml` to `flatcircle.*`.
+`flatcircle`, `kelpie` and `shepherd` still work as deprecated aliases: their
+`bin/` links point at `bin/quartermaster`, `configure` repoints existing
+`~/.local/bin` links under those names, and running one prints a one-line
+notice. A coordinator agent still named by an old name is renamed
+`quartermaster` by the ticker, and its workspace, if still labelled with an
+old name, is relabelled `quartermaster`. An older ticker is restarted as
+quartermaster by `quartermaster ticker start`. The Herdr plugin id changed
+too, so unlink the old plugin, link or install this one, and rename
+`flatcircle.*` (or `kelpie.*`, `shepherd.*`) keys in
+`~/.config/herdr/config.toml` to `quartermaster.*`.
 
 Add the sidebar row and keys to `~/.config/herdr/config.toml`:
 
@@ -457,20 +460,20 @@ rows = [["state_icon", "machine", "workspace", "tab"], ["agent"],
 [[keys.command]]
 key = "prefix+j"
 type = "plugin_action"
-command = "flatcircle.board"
+command = "quartermaster.board"
 
 [[keys.command]]
 key = "prefix+shift+j"
 type = "plugin_action"
-command = "flatcircle.coordinator"
+command = "quartermaster.coordinator"
 ```
 
-`flatcircle.focus-clipboard` (Claude) and `flatcircle.focus-clipboard-codex` focus
+`quartermaster.focus-clipboard` (Claude) and `quartermaster.focus-clipboard-codex` focus
 or start the bead whose id is on the clipboard, if you want keys for those too.
 
 ## Configuration
 
-`~/.config/flatcircle/config.toml`; only `repo` is required:
+`~/.config/quartermaster/config.toml`; only `repo` is required:
 
 ```toml
 repo = "~/src/myproject"
@@ -498,36 +501,38 @@ not the server that happened to start it: every herdr server that loads the
 plugin runs its startup, and a ticker on a server without the coordinator
 sees no agents. If the coordinator runs in a named session, set it to that
 session's socket (`~/.config/herdr/sessions/<name>/herdr.sock`).
-`flatcircle ticker status` prints the socket the ticker follows, `flatcircle
-context` warns when it isn't the coordinator's, and `flatcircle ticker start`
+`quartermaster ticker status` prints the socket the ticker follows, `quartermaster
+context` warns when it isn't the coordinator's, and `quartermaster ticker start`
 moves a ticker that is on the wrong one.
 
 `repo` is the default repository. A bead whose work is in another one carries
 the label `repo:<name>` for a name in `repos` (`bd label add <bead> repo:infra`);
 its worktree, branch and PRs then live in that repository, and
-`flatcircle context` tags its thread `[infra]`. A `repo:` label naming no
+`quartermaster context` tags its thread `[infra]`. A `repo:` label naming no
 configured repository falls back to `repo` and shows as a warning in
-`flatcircle context`.
+`quartermaster context`.
 
-`~/.config/flatcircle/instructions.md` is added to every worker's brief.
+`~/.config/quartermaster/instructions.md` is added to every worker's brief.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `flatcircle coordinator [--agent K]` | Open (or focus) the coordinator agent. Also `prefix+shift+j`. |
-| `flatcircle dispatch <bead> [--agent K] [--focus]` | Claim a bead, create its worktree and branch, start a worker and brief it. |
-| `flatcircle focus [<bead>] [--agent K]` | Focus the bead's worker, or dispatch one. With no bead, reads the id from the clipboard. |
-| `flatcircle context` | The coordinator's digest: inbox, threads by state, Linear moves, `next` and ready beads. |
-| `flatcircle inbox done [<bead>...]` | Mark inbox items handled (all of them if no bead is given). |
-| `flatcircle resume [<bead>...] [--agent K]` | Restart exited workers in their worktrees, continuing their last conversation. |
-| `flatcircle stale [--days N] [--release]` | List claims with no agent, worktree or PR untouched N days (7); `--release` reopens them. |
-| `flatcircle verify [<bead>...] [--yes]` | Stale beads with evidence their work is done. Lists what a pass would do; `--yes` acts like the ticker (closes only with `auto_close`). |
-| `flatcircle resolve <bead> [--force]` | Remove a finished bead's worktree, and its branch if the PR merged. |
-| `flatcircle sweep [--yes]` | List finished worktrees across every repo; `--yes` removes only the safe ones. |
-| `flatcircle report [--since 24h\|7d\|DATE]` | Markdown summary of what shipped, what's in flight and what needs you. |
-| `flatcircle board` | The board popup (`prefix+j`). |
-| `flatcircle ticker run\|start\|stop\|status`, `flatcircle tick` | The background loop, or one pass of it in the foreground. `status` shows the herdr socket it follows. |
-| `flatcircle configure` / `unconfigure` | Install, or remove, the agent view and sidebar tokens. |
+| `quartermaster coordinator [--agent K]` | Open (or focus) the coordinator agent. Also `prefix+shift+j`. |
+| `quartermaster dispatch <bead> [--agent K] [--focus]` | Claim a bead, create its worktree and branch, start a worker and brief it. |
+| `quartermaster focus [<bead>] [--agent K]` | Focus the bead's worker, or dispatch one. With no bead, reads the id from the clipboard. |
+| `quartermaster context` | The coordinator's digest: inbox, threads by state, Linear moves, `next` and ready beads. |
+| `quartermaster inbox done [<bead>...]` | Mark inbox items handled (all of them if no bead is given). |
+| `quartermaster resume [<bead>...] [--agent K]` | Restart exited workers in their worktrees, continuing their last conversation. |
+| `quartermaster stale [--days N] [--release]` | List claims with no agent, worktree or PR untouched N days (7); `--release` reopens them. |
+| `quartermaster verify [<bead>...] [--yes]` | Stale beads with evidence their work is done. Lists what a pass would do; `--yes` acts like the ticker (closes only with `auto_close`). |
+| `quartermaster resolve <bead> [--force]` | Remove a finished bead's worktree, and its branch if the PR merged. |
+| `quartermaster sweep [--yes]` | List finished worktrees across every repo; `--yes` removes only the safe ones. |
+| `quartermaster report [--since 24h\|7d\|DATE]` | Markdown summary of what shipped, what's in flight and what needs you. |
+| `quartermaster board` | The board popup (`prefix+j`). |
+| `quartermaster ticker run\|start\|stop\|status`, `quartermaster tick` | The background loop, or one pass of it in the foreground. `status` shows the herdr socket it follows. |
+| `quartermaster configure` / `unconfigure` | Install, or remove, the agent view and sidebar tokens. |
 
 `K` is `claude`, `codex` or `auto`.
+
+`qm` is a short alias for `quartermaster`: `qm context` is `quartermaster context`.

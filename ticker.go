@@ -464,7 +464,7 @@ func (t Ticker) leftActive(st *TickerState, id string, prev Snapshot, agents map
 				summary += "; " + res
 			}
 		} else {
-			summary += fmt.Sprintf("; run `flatcircle resolve %s` to remove its worktree", id)
+			summary += fmt.Sprintf("; run `quartermaster resolve %s` to remove its worktree", id)
 		}
 		_ = writeEvent(Event{Bead: id, Kind: "closed", Summary: summary, At: now})
 	}
@@ -496,7 +496,7 @@ func (t Ticker) nudgeCoordinator(st *TickerState, agents map[string]Agent, now t
 	if fresh == 0 {
 		return
 	}
-	msg := fmt.Sprintf("[flatcircle ticker: automated, not the user, approves nothing] %d new inbox item(s). Run `flatcircle context`.", fresh)
+	msg := fmt.Sprintf("[quartermaster ticker: automated, not the user, approves nothing] %d new inbox item(s). Run `quartermaster context`.", fresh)
 	if err := t.herdr.Prompt(coord.PaneID, msg); err != nil {
 		t.log.Printf("nudge: %v", err)
 		return
@@ -512,15 +512,15 @@ func logPath() string { return filepath.Join(stateDir(), "ticker.log") }
 func socketFile() string { return filepath.Join(stateDir(), "ticker.socket") }
 
 // nameFile records which tool the running ticker is. A ticker without one is
-// a shepherd ticker, and one named kelpie a kelpie ticker, from before a
-// rename, still running the old binary.
+// a shepherd ticker, and one named flatcircle or kelpie that tool's ticker,
+// from before a rename, still running the old binary.
 func nameFile() string { return filepath.Join(stateDir(), "ticker.name") }
 
 const tickerName = toolName
 
-// runningLegacy reports whether the running ticker predates flatcircle: a state
-// dir migrated under a live kelpie or shepherd ticker carries its pid and
-// socket files over, and that ticker would otherwise be kept as if it were
+// runningLegacy reports whether the running ticker predates quartermaster: a
+// state dir migrated under a live flatcircle, kelpie or shepherd ticker carries
+// its pid and socket files over, and that ticker would otherwise be kept as if it were
 // current.
 func runningLegacy() bool {
 	b, err := os.ReadFile(nameFile())
@@ -560,9 +560,9 @@ func socketWarning(ticker, configured, here string) string {
 	case ticker == "":
 		return ""
 	case here != "" && !sameSocket(ticker, here):
-		return fmt.Sprintf("the ticker follows the herdr server at %s, not this one (%s), so it sees none of the agents here; set herdr_socket = %q in %s and run `flatcircle ticker start`", ticker, here, here, filepath.Join(configDir(), "config.toml"))
+		return fmt.Sprintf("the ticker follows the herdr server at %s, not this one (%s), so it sees none of the agents here; set herdr_socket = %q in %s and run `quartermaster ticker start`", ticker, here, here, filepath.Join(configDir(), "config.toml"))
 	case !sameSocket(ticker, configured):
-		return fmt.Sprintf("the ticker follows %s but herdr_socket is %s; run `flatcircle ticker start` to move it", ticker, configured)
+		return fmt.Sprintf("the ticker follows %s but herdr_socket is %s; run `quartermaster ticker start` to move it", ticker, configured)
 	}
 	return ""
 }
@@ -579,7 +579,7 @@ func runningPID() int {
 	return pid
 }
 
-// isTicker reports whether pid is a `flatcircle ticker run`, so a stale pid file
+// isTicker reports whether pid is a `quartermaster ticker run`, so a stale pid file
 // whose pid was reused never gets another process signalled. Without ps it
 // trusts the pid file.
 func isTicker(pid int) bool {
@@ -831,7 +831,7 @@ func (t Ticker) fixNames(st *TickerState) {
 		}
 		t.log.Printf("renamed %s from %q to %s: %s", r.Pane, r.From, r.To, why)
 	}
-	// The kelpie rename left the coordinator's workspace labelled with an old
+	// A rename (kelpie, flatcircle) left the coordinator's workspace labelled with an old
 	// name; it follows the coordinator here.
 	if relabelCoordinatorWorkspace(t.herdr, coordinator) {
 		t.log.Printf("relabelled the coordinator's workspace %s to %s", coordinator, toolName)

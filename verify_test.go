@@ -427,6 +427,15 @@ func TestVerifySkipsOnLowBudget(t *testing.T) {
 	if !errors.Is(err, errBudget) || f.calls["github"] != 0 {
 		t.Fatalf("err %v calls %v, want a budget skip with no calls", err, f.calls)
 	}
+	// ticker status reads the reading to say verify is paused.
+	if st.GHLeft != 999 || !st.GHLeftAt.Equal(vNow) {
+		t.Fatalf("recorded %d at %s, want 999 at %s", st.GHLeft, st.GHLeftAt, vNow)
+	}
+	dry := TickerState{}
+	verifyPass(vcfg(true), f.env(), &dry, nil, false, vNow)
+	if !dry.GHLeftAt.IsZero() {
+		t.Fatal("a dry run must not record the budget")
+	}
 }
 
 func TestVerifyDryRunChangesNothing(t *testing.T) {

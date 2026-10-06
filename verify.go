@@ -752,7 +752,11 @@ func plan(cfg Config, cands []Bead, marks map[string]VerifyMark, mains map[strin
 // flags them and caches what it found in st. Without act it changes nothing
 // and returns every verdict; with act, only the verdicts that changed.
 func verifyPass(cfg Config, env verifyEnv, st *TickerState, ids []string, act bool, now time.Time) ([]string, error) {
-	if left, err := env.graphqlLeft(); err == nil && left < cfg.GHMinRemaining {
+	left, err := env.graphqlLeft()
+	if err == nil && act {
+		st.GHLeft, st.GHLeftAt = left, now
+	}
+	if err == nil && left < cfg.GHMinRemaining {
 		return []string{fmt.Sprintf("verify skipped: %d GitHub GraphQL points left, below gh_min_remaining %d", left, cfg.GHMinRemaining)}, errBudget
 	}
 	marks, repos := st.Verified, st.VerifyRepos

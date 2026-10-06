@@ -494,6 +494,8 @@ stale_days = 3            # a bead untouched this long is checked
 auto_close = false        # close beads on strong evidence; off, they are only flagged
 verify_max = 20           # GitHub calls a pass may make beyond its probes
 gh_min_remaining = 1000   # skip a pass below this many GraphQL points left
+heartbeat_minutes = 0     # log a status line this often so a quiet log shows it's alive; 0 is off
+sidebar_tick = false      # show the last pass's time on the coordinator's sidebar row
 ```
 
 The ticker always follows `herdr_socket` (herdr's default server unless set),
@@ -504,6 +506,13 @@ session's socket (`~/.config/herdr/sessions/<name>/herdr.sock`).
 `quartermaster ticker status` prints the socket the ticker follows, `quartermaster
 context` warns when it isn't the coordinator's, and `quartermaster ticker start`
 moves a ticker that is on the wrong one.
+
+`quartermaster ticker status` also shows how long ago each pass last ran
+(`tick 4s ago · gh 41s ago · nudge 10m ago · verify 21m ago`) and warns when a
+pass is more than three intervals late, when gh is failing, or when verify is
+paused below `gh_min_remaining`. The log records only actions, so a quiet
+`ticker.log` doesn't mean a stopped ticker; check `ticker status`, or set
+`heartbeat_minutes`.
 
 `repo` is the default repository. A bead whose work is in another one carries
 the label `repo:<name>` for a name in `repos` (`bd label add <bead> repo:infra`);

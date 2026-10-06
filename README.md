@@ -53,8 +53,8 @@ nudges the coordinator; the coordinator reads the inbox through
    │                    │     └── quartermaster context◀┐           │  │ prompts, once idle 60s
    │ notifications      │ nudge                      │ inbox     │  │ (checks, reviews, merge, runs)
    │ + sidebar          │                            │           ▼  │
-   └──────────────────── ticker ─────────────────────┴──── reads bd, herdr, gh
-                         every 15s (PRs and runs every 60s)
+   └──────────────────── ticker ─────────────────────┴──── reads bd and herdr every 15s,
+                                                            GitHub PRs and runs every 60s
 ```
 
 1. **You ask the coordinator for something.** It runs `quartermaster context`,
@@ -136,12 +136,13 @@ you pass `--force`, and it only ever removes a linked worktree on that bead's
 branch, never the main checkout. If the worker ran somewhere other than its
 own worktree, there's nothing to remove; close its pane.
 
-When you close something, also:
+Workers save what the next worker should know with `bd remember` and move
+their Linear issues as they go, and the coordinator marks inbox items handled.
+If you close a bead by hand, without the coordinator, do these yourself:
 
 - save anything the next worker should know with `bd remember "…"`; every new
   session loads it at start-up;
-- mark its inbox items handled (`quartermaster inbox done <bead>`) if you dealt
-  with it without the coordinator;
+- mark its inbox items handled (`quartermaster inbox done <bead>`);
 - move its Linear issue to Done (`quartermaster context` lists the moves due).
 
 ### Messages
@@ -151,7 +152,7 @@ Every automated message says it isn't from you, and none approves anything.
 | From → to | When | Starts with |
 |---|---|---|
 | dispatch → worker | Once, at start | `You are the quartermaster worker for bead …` |
-| ticker → worker | Checks fail, review feedback, ready to merge, auto-merge turned off, merge, run finished | `[quartermaster: automated, not the user] PR #N …` |
+| ticker → worker | Checks fail, review feedback, ready to merge, auto-merge turned off, merge, run finished | `[quartermaster: automated, not the user] PR #N …`, or `… <workflow> run <url> …` for a run |
 | resume → worker | After `quartermaster resume` | `[quartermaster] You were resumed after your agent exited.` |
 | ticker → coordinator | New inbox items and the coordinator is idle | `[quartermaster ticker: automated, not the user, approves nothing] N new inbox item(s).` |
 | worker → everyone | Any time | A note on its bead (`bd note`), or a status change |
@@ -165,7 +166,8 @@ once per head commit; otherwise the board shows
 `approved but blocked: 3 open threads, stale approval`), `merged`,
 `auto_merge_off` (GitHub turned off a PR's auto-merge), `run_succeeded`,
 `run_failed`, `finished` (a worker finished a turn),
-`agent_gone` (its agent exited) and `closed`.
+`agent_gone` (its agent exited), `resumed` (its agent was restarted),
+`likely_stale` and `auto_closed` (from the stale-bead check), and `closed`.
 
 ### Features in detail
 
@@ -421,6 +423,34 @@ then `herdr plugin link "$PWD"` and `bin/quartermaster configure --repo <path>`.
 The name `quartermaster` is only this tool's binary and Herdr plugin id; it is not
 published to any package registry.
 
+### Keys and sidebar
+
+Add the sidebar row and keys to `~/.config/herdr/config.toml`; Getting started
+uses them:
+
+```toml
+[ui.sidebar.agents]
+rows = [["state_icon", "machine", "workspace", "tab"], ["agent"],
+        [{ token = "$sh_state", rules = [{ starts_with = "needs you", fg = "#f38ba8", bold = true },
+                                          { starts_with = "checks failing", fg = "#f38ba8" },
+                                          { starts_with = "review", fg = "#f9e2af" },
+                                          { starts_with = "rolling out", fg = "#f9e2af" },
+                                          { starts_with = "merged", fg = "#a6e3a1" }] }]]
+
+[[keys.command]]
+key = "prefix+j"
+type = "plugin_action"
+command = "quartermaster.board"
+
+[[keys.command]]
+key = "prefix+shift+j"
+type = "plugin_action"
+command = "quartermaster.coordinator"
+```
+
+`quartermaster.focus-clipboard` (Claude) and `quartermaster.focus-clipboard-codex` focus
+or start the bead whose id is on the clipboard, if you want keys for those too.
+
 ### Upgrading from flatcircle, kelpie or shepherd
 
 quartermaster was called flatcircle, kelpie before that, and shepherd before
@@ -445,31 +475,6 @@ quartermaster by `quartermaster ticker start`. The Herdr plugin id changed
 too, so unlink the old plugin, link or install this one, and rename
 `flatcircle.*` (or `kelpie.*`, `shepherd.*`) keys in
 `~/.config/herdr/config.toml` to `quartermaster.*`.
-
-Add the sidebar row and keys to `~/.config/herdr/config.toml`:
-
-```toml
-[ui.sidebar.agents]
-rows = [["state_icon", "machine", "workspace", "tab"], ["agent"],
-        [{ token = "$sh_state", rules = [{ starts_with = "needs you", fg = "#f38ba8", bold = true },
-                                          { starts_with = "checks failing", fg = "#f38ba8" },
-                                          { starts_with = "review", fg = "#f9e2af" },
-                                          { starts_with = "rolling out", fg = "#f9e2af" },
-                                          { starts_with = "merged", fg = "#a6e3a1" }] }]]
-
-[[keys.command]]
-key = "prefix+j"
-type = "plugin_action"
-command = "quartermaster.board"
-
-[[keys.command]]
-key = "prefix+shift+j"
-type = "plugin_action"
-command = "quartermaster.coordinator"
-```
-
-`quartermaster.focus-clipboard` (Claude) and `quartermaster.focus-clipboard-codex` focus
-or start the bead whose id is on the clipboard, if you want keys for those too.
 
 ## Configuration
 
@@ -531,7 +536,9 @@ configured repository falls back to `repo` and shows as a warning in
 | `quartermaster report [--since 24h\|7d\|DATE]` | Markdown summary of what shipped, what's in flight and what needs you. |
 | `quartermaster board` | The board popup (`prefix+j`). |
 | `quartermaster ticker run\|start\|stop\|status`, `quartermaster tick` | The background loop, or one pass of it in the foreground. `status` shows the herdr socket it follows. |
-| `quartermaster configure` / `unconfigure` | Install, or remove, the agent view and sidebar tokens. |
+| `quartermaster configure [--repo PATH]` | First-time setup: write the config, link `~/.local/bin/quartermaster` (and `qm`), install the agent view. Safe to run again. |
+| `quartermaster unconfigure` | Stop the ticker and remove the agent view and sidebar tokens. |
+| `quartermaster version` | Print the version. |
 
 `K` is `claude`, `codex` or `auto`.
 

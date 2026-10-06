@@ -399,7 +399,7 @@ to build from source.
 ## Install
 
 ```sh
-herdr plugin install travisjeffery/herdr-quartermaster --ref v0.5.0
+herdr plugin install travisjeffery/herdr-quartermaster --ref v0.5.1
 ```
 
 Herdr downloads the prebuilt binary for your machine and checks it against the

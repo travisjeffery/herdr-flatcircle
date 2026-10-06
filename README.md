@@ -121,13 +121,13 @@ workspace, closing the worker's pane, and deletes the local branch if the PR
 merged. With `auto_resolve = true` the ticker resolves on its own once the PR
 has merged, the bead is closed and the agent is idle.
 
-By hand:
+Other cases:
 
-| Situation | Do this |
+| Situation | What happens |
 |---|---|
-| Done without a PR (an investigation, an ops task) | `bd close <id> --reason "…"`, then `quartermaster resolve <id>` |
-| Dropping the work | `bd close <id> --reason "dropped: …"`, or `bd update <id> --status deferred` to park it; then `quartermaster resolve <id> --force` if nothing in the worktree is worth keeping |
-| Done, but you want the worktree a while longer | Close the bead and resolve it later |
+| Done without a PR (an investigation, an ops task) | The worker closes its bead with a reason when it finishes; the coordinator runs `quartermaster resolve <id>` (auto-resolve only covers merged PRs) |
+| Dropping or parking the work | Tell the coordinator; it closes the bead (`--reason "dropped: …"`) or defers it, then resolves it, with `--force` only if nothing in the worktree is worth keeping |
+| Done, but you want the worktree a while longer | Ask the coordinator to hold off on `resolve` |
 | Finished worktrees have piled up | `quartermaster sweep`, then `quartermaster sweep --yes` to remove the safe ones |
 | Claims nobody is going to finish | `quartermaster stale`, then `quartermaster stale --release` to reopen them |
 

@@ -63,7 +63,9 @@ func TestLinkCLI(t *testing.T) {
 	if msg, err := linkCLI(self, target); err != nil || !strings.HasPrefix(msg, "linked") {
 		t.Fatalf("an old link should be replaced: %q %v", msg, err)
 	}
-	if dest, _ := filepath.EvalSymlinks(target); dest != self {
+	// On macOS t.TempDir is under /var, a link to /private/var.
+	realSelf, _ := filepath.EvalSymlinks(self)
+	if dest, _ := filepath.EvalSymlinks(target); dest != realSelf {
 		t.Fatalf("points at %s", dest)
 	}
 

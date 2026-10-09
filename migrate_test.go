@@ -200,3 +200,28 @@ func TestMigrateDirsFromFlatcircle(t *testing.T) {
 		t.Fatalf("second run is not a no-op: %q", msgs)
 	}
 }
+
+// On macOS, config used to live under os.UserConfigDir; migrateDirs moves it to
+// configBase and links the old path.
+func TestMigrateDirsFromUserConfigDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	old, err := os.UserConfigDir()
+	if err != nil || old == configBase() {
+		t.Skip("os.UserConfigDir is configBase on this platform")
+	}
+	if err := os.MkdirAll(filepath.Join(old, "quartermaster"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(old, "quartermaster", "config.toml"), []byte(`repo = "/r"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	migrateDirs()
+	if b, err := os.ReadFile(filepath.Join(configDir(), "config.toml")); err != nil || string(b) != `repo = "/r"` {
+		t.Fatalf("config not moved to %s: %q %v", configDir(), b, err)
+	}
+	if fi, err := os.Lstat(filepath.Join(old, "quartermaster")); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("old path should be a link: %v", err)
+	}
+}

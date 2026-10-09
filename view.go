@@ -46,8 +46,7 @@ func herdrSocket() string {
 
 // defaultHerdrSocket is the socket of herdr's default (unnamed) session.
 func defaultHerdrSocket() string {
-	d, _ := os.UserConfigDir()
-	return filepath.Join(d, "herdr", "herdr.sock")
+	return filepath.Join(configBase(), "herdr", "herdr.sock")
 }
 
 func (s socketRPC) Call(method string, params any) (json.RawMessage, error) {

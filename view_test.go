@@ -5,11 +5,24 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"testing"
 )
+
+// socketPath is a herdr.sock path short enough to bind: macOS caps unix socket
+// paths at 104 bytes, and t.TempDir's long per-test path exceeds that.
+func socketPath(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "qm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return filepath.Join(dir, "herdr.sock")
+}
 
 // fakeHerdr models herdr 0.9.1's view semantics (src/app/api/agent_view.rs):
 // one view per server, set replaces it, clear with a source removes it only
@@ -91,7 +104,7 @@ func TestUnconfigureClearsOnlyQuartermastersView(t *testing.T) {
 }
 
 func TestSocketRPCWireFormat(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "herdr.sock")
+	path := socketPath(t)
 	ln, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +137,7 @@ func TestSocketRPCWireFormat(t *testing.T) {
 }
 
 func TestSocketRPCSurfacesHerdrErrors(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "herdr.sock")
+	path := socketPath(t)
 	ln, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatal(err)

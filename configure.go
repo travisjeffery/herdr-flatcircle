@@ -110,7 +110,13 @@ func linkCLI(self, target string) (string, error) {
 	case fi.Mode()&os.ModeSymlink == 0:
 		return fmt.Sprintf("%s is a real file, not a link; left it alone (quartermaster is at %s)", target, self), nil
 	default:
-		if dest, err := filepath.EvalSymlinks(target); err == nil && dest == self {
+		// Resolve self too: a path through a symlink (macOS's /var, a linked
+		// ~/src) never equals the fully resolved target.
+		realSelf, err := filepath.EvalSymlinks(self)
+		if err != nil {
+			realSelf = self
+		}
+		if dest, err := filepath.EvalSymlinks(target); err == nil && dest == realSelf {
 			return target + " already links to " + self, nil
 		}
 		if err := os.Remove(target); err != nil {

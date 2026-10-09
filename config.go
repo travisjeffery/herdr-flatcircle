@@ -103,9 +103,15 @@ func envNames(suffix string) []string {
 	return out
 }
 
+// configBase is $XDG_CONFIG_HOME, else ~/.config, on every platform. herdr keeps
+// its config and socket there on macOS too, where os.UserConfigDir would say
+// ~/Library/Application Support.
 func configBase() string {
-	d, _ := os.UserConfigDir()
-	return d
+	if d := os.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(d) {
+		return d
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config")
 }
 
 func stateBase() string {
@@ -161,6 +167,13 @@ func migrateDirs() []string {
 		if envDir(envNames(d.env)...) != "" {
 			continue
 		}
+		// On macOS, config used to live under os.UserConfigDir
+		// (~/Library/Application Support) before configBase.
+		if old, err := os.UserConfigDir(); err == nil && d.env == "CONFIG_DIR" && old != d.base {
+			for _, n := range append([]string{toolName}, legacyNames...) {
+				out = append(out, migrateDir(filepath.Join(old, n), filepath.Join(d.base, toolName))...)
+			}
+		}
 		for _, n := range legacyNames {
 			out = append(out, migrateDir(filepath.Join(d.base, n), filepath.Join(d.base, toolName))...)
 		}
@@ -180,6 +193,9 @@ func migrateDir(legacy, dir string) []string {
 	}
 	if _, err := os.Lstat(dir); err == nil {
 		return []string{fmt.Sprintf("both %s and %s exist; using %s, left %s alone", dir, legacy, dir, legacy)}
+	}
+	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+		return []string{fmt.Sprintf("could not create %s (%v); still using %s", filepath.Dir(dir), err, legacy)}
 	}
 	if err := os.Rename(legacy, dir); err != nil {
 		return []string{fmt.Sprintf("could not move %s to %s (%v); still using %s", legacy, dir, err, legacy)}

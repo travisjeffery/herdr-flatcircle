@@ -21,6 +21,7 @@ import (
 
 type TickerState struct {
 	Threads      map[string]Snapshot   `json:"threads"`
+	LastTick     time.Time             `json:"last_tick"`
 	LastGH       time.Time             `json:"last_gh"`
 	PRs          map[string]PR         `json:"prs"`                  // by bead id, from the last gh pass
 	MergedPRs    map[string][]PR       `json:"merged_prs,omitempty"` // each bead's merged PRs, from the last gh pass
@@ -35,6 +36,21 @@ type TickerState struct {
 	LastVerify   time.Time             `json:"last_verify"`
 	Verified     map[string]VerifyMark `json:"verified"`     // by bead id, from verify passes
 	VerifyRepos  map[string]VerifyRepo `json:"verify_repos"` // by repo path
+	GHLeft       int                   `json:"gh_left"`      // GraphQL points left, as of GHLeftAt
+	GHLeftAt     time.Time             `json:"gh_left_at"`   // when a verify pass last read GHLeft
+	// Intervals are the running ticker's, which a config edit since it
+	// started doesn't change: status measures lateness against these.
+	Intervals *Intervals `json:"intervals,omitempty"`
+}
+
+type Intervals struct {
+	Tick   time.Duration `json:"tick"`
+	GH     time.Duration `json:"gh"`
+	Verify time.Duration `json:"verify"`
+}
+
+func intervalsOf(cfg Config) Intervals {
+	return Intervals{Tick: cfg.tick(), GH: cfg.ghEvery(), Verify: cfg.verifyEvery()}
 }
 
 func statePath() string { return filepath.Join(stateDir(), "state.json") }
@@ -359,6 +375,11 @@ func (t Ticker) once(st *TickerState) error {
 	if err != nil {
 		return err
 	}
+	// Only a pass that got its data counts: a ticker failing every pass shows
+	// as late in `ticker status`.
+	st.LastTick = now
+	iv := intervalsOf(t.cfg)
+	st.Intervals = &iv
 	// Worktrees are listed with the PR pass, not every tick.
 	if st.LastGH.Equal(now) {
 		t.fixNames(st)
@@ -711,6 +732,11 @@ func tickerStatus(cfg Config) {
 			sock = "unknown herdr server (started by an older version; restart it)"
 		}
 		fmt.Printf("ticker running (pid %d) on %s, log %s\n", pid, sock, logPath())
+		st := loadState()
+		fmt.Println(statusAges(st, time.Now()))
+		for _, w := range statusWarnings(cfg, st, time.Now()) {
+			fmt.Println("warning:", w)
+		}
 		if runningLegacy() {
 			fmt.Printf("warning: it is %s's ticker, from before the rename; run `%s ticker start` to restart it as %s\n", runningTool(), toolName, toolName)
 		}

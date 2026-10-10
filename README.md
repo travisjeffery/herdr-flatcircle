@@ -510,6 +510,12 @@ session's socket (`~/.config/herdr/sessions/<name>/herdr.sock`).
 context` warns when it isn't the coordinator's, and `quartermaster ticker start`
 moves a ticker that is on the wrong one.
 
+`quartermaster ticker status` also shows how long ago each pass last ran
+(`tick 4s ago · gh 41s ago · nudge 10m ago · verify 21m ago`) and warns when a
+pass is more than three intervals late, when gh is failing, or when verify is
+paused below `gh_min_remaining`. The log records only actions, so a quiet
+`ticker.log` doesn't mean a stopped ticker; check `ticker status`.
+
 `repo` is the default repository. A bead whose work is in another one carries
 the label `repo:<name>` for a name in `repos` (`bd label add <bead> repo:infra`);
 its worktree, branch and PRs then live in that repository, and
